@@ -1,0 +1,2 @@
+[workspace]
+members = ["flux-flow", "flux-flow-macros"]
