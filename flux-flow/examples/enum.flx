@@ -1,0 +1,15 @@
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+// is syntactic sugar for
+
+type Color = Color::Red | Color::Green | Color::Blue;
+
+impl Color {
+    type Red;
+    type Green;
+    type Blue;
+}

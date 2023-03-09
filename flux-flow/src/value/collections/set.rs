@@ -6,8 +6,8 @@ use crate::static_type::StaticType;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TypedSet {
-    pub(crate) ty: StaticType,
-    pub(crate) data: BTreeSet<Value>,
+    pub ty: StaticType,
+    pub data: BTreeSet<Value>,
 }
 
 impl TypedSet {

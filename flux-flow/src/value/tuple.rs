@@ -34,7 +34,7 @@ macro_rules! impl_from_small_tuple_for_value {
     ( $TupleN:ident $( $T:ident $t:ident )* ) => {
         impl< $( $T: Into<Value>, )* > From<( $( $T, )* )> for Value {
             fn from(( $( $t, )* ): ( $( $T, )* )) -> Self {
-                Self(ValueStorage::$TupleN(Arc::new(( $( $t.into() ),* ))))
+                Self(ValueStorage::$TupleN(Arc::new([ $( $t.into(), )* ])))
             }
         }
 
@@ -59,11 +59,11 @@ macro_rules! impl_from_small_tuple_for_value {
                     ValueStorage::$TupleN(mut values) => {
                         let values_mut = Arc::make_mut(&mut values);
                         #[allow(unused_parens)]
-                        let ( $( $t ),* ) = take(values_mut);
+                        let [ $( $t, )* ] = take(values_mut);
                         match ( $( $t.try_into(), )* ) {
                             ( $( Ok($t), )* ) => Ok(( $( $t, )* )),
                             ( $( $t, )* ) => {
-                                *values_mut = ( $( $t.map(Value::from).unwrap_or_else(|value| value) ),* );
+                                *values_mut = [ $( $t.map(Value::from).unwrap_or_else(|value| value), )* ];
                                 Err(Value(ValueStorage::$TupleN(values)))
                             }
                         }
@@ -81,7 +81,7 @@ macro_rules! impl_from_small_tuple_for_value {
             fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
                 if let Value(ValueStorage::$TupleN(box_value)) = value {
                     #[allow(unused_parens)]
-                    let ( $( $t ),* ) = box_value.as_ref();
+                    let [ $( $t, )* ] = box_value.as_ref();
                     if let ( $( Ok($t), )* ) = ( $( $t.try_into(), )* ) {
                         return Ok(( $( $t, )* ));
                     }
@@ -170,23 +170,26 @@ impl From<Tuple> for Value {
     fn from(mut value: Tuple) -> Self {
         match value.0.len() {
             0 => Self(ValueStorage::Unit),
-            1 => Self(ValueStorage::Tuple1(Arc::new(
-                value.0.iter_mut().map(|value| take(value)).next().unwrap(),
-            ))),
+            1 => Self(ValueStorage::Tuple1(Arc::new([value
+                .0
+                .iter_mut()
+                .map(take)
+                .next()
+                .unwrap()]))),
             2 => {
-                let mut values_iter = value.0.iter_mut().map(|value| take(value));
-                Self(ValueStorage::Tuple2(Arc::new((
+                let mut values_iter = value.0.iter_mut().map(take);
+                Self(ValueStorage::Tuple2(Arc::new([
                     values_iter.next().unwrap(),
                     values_iter.next().unwrap(),
-                ))))
+                ])))
             }
             3 => {
-                let mut values_iter = value.0.iter_mut().map(|value| take(value));
-                Self(ValueStorage::Tuple3(Arc::new((
+                let mut values_iter = value.0.iter_mut().map(take);
+                Self(ValueStorage::Tuple3(Arc::new([
                     values_iter.next().unwrap(),
                     values_iter.next().unwrap(),
                     values_iter.next().unwrap(),
-                ))))
+                ])))
             }
             _ => Self(ValueStorage::Tuple4OrMore(Arc::new(value.0))),
         }
@@ -197,13 +200,13 @@ impl From<&Tuple> for Value {
     fn from(value: &Tuple) -> Self {
         match &value.0[..] {
             [] => Self(ValueStorage::Unit),
-            [t0] => Self(ValueStorage::Tuple1(Arc::new(t0.clone()))),
-            [t0, t1] => Self(ValueStorage::Tuple2(Arc::new((t0.clone(), t1.clone())))),
-            [t0, t1, t2] => Self(ValueStorage::Tuple3(Arc::new((
+            [t0] => Self(ValueStorage::Tuple1(Arc::new([t0.clone()]))),
+            [t0, t1] => Self(ValueStorage::Tuple2(Arc::new([t0.clone(), t1.clone()]))),
+            [t0, t1, t2] => Self(ValueStorage::Tuple3(Arc::new([
                 t0.clone(),
                 t1.clone(),
                 t2.clone(),
-            )))),
+            ]))),
             values => Self(ValueStorage::Tuple4OrMore(Arc::new(
                 values.iter().cloned().collect(),
             ))),

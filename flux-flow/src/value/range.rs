@@ -8,35 +8,35 @@ use crate::runtime_type::RuntimeType;
 use super::{Value, ValueStorage};
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct StartEnd {
+pub struct StartEnd {
     start: Value,
     end: Value,
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Start {
+pub struct Start {
     start: Value,
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct End {
+pub struct End {
     end: Value,
 }
 
 impl StartEnd {
-    pub(crate) fn get_type(&self) -> RuntimeType {
+    pub fn get_type(&self) -> RuntimeType {
         self.start.get_type()
     }
 }
 
 impl Start {
-    pub(crate) fn get_type(&self) -> RuntimeType {
+    pub fn get_type(&self) -> RuntimeType {
         self.start.get_type()
     }
 }
 
 impl End {
-    pub(crate) fn get_type(&self) -> RuntimeType {
+    pub fn get_type(&self) -> RuntimeType {
         self.end.get_type()
     }
 }

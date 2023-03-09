@@ -1,0 +1,30 @@
+// `Seconds` is a new type.
+// It can be converted to and from `f32` using `as`.
+type Seconds = f32;
+
+let seconds: Seconds = 1.0 as Seconds;
+let _: f32 = seconds as f32;
+
+
+// `Minutes` is a type alias that is fully interchangeable with `f32`.
+use Minutes = f32;
+
+let minutes: Minutes = 1.0;
+let _: f32 = minutes;
+
+
+// `Hours` is a type alias to a tuple holding an `f32`.
+// I don't see a lot of use cases for this.
+use Hours = #(f32);
+
+let hours: Hours = #(1.0);
+let _: f32 = hours.0;
+let #(_) = hours;
+
+
+// `Milliseconds` is a proper new type whose innards can only be accessed via tuple indexing.
+type Milliseconds = #(f32);
+
+let milliseconds = Milliseconds #(1.0);
+let _: f32 = milliseconds.0;
+let Milliseconds #(_) = milliseconds;

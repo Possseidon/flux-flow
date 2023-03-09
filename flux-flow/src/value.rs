@@ -4,26 +4,29 @@ pub mod primitives;
 pub mod range;
 pub mod string;
 pub mod tuple;
+pub mod typed_function;
 
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    sync::Arc,
+};
 
 use ordered_float::OrderedFloat;
 
 use crate::{
-    runtime_type::{NewType, RuntimeType, Struct},
+    runtime_type::{NamedStruct, RuntimeType, TypedStruct},
     static_type::StaticType,
 };
 
 use self::{
-    collections::{
-        array::TypedArray, deque::TypedDeque, map::TypedMap, set::TypedSet, vec::TypedVec,
-    },
     function::Function,
     primitives::NativeFunction,
     range::{End, Start, StartEnd},
 };
 
 // TODO: Use smartstring again to save on allocations
+
+// TODO: Deeply nested Value can cause a stack overflow on drop.
 
 /// Stores a value of any type.
 ///
@@ -42,13 +45,18 @@ enum ValueStorage {
     Unit,
 
     /// Stored in place to avoid additional heap allocation.
-    Tuple1(Arc<Value>),
+    Tuple1(Arc<[Value; 1]>),
     /// Stored in place to avoid additional heap allocation.
-    Tuple2(Arc<(Value, Value)>),
+    Tuple2(Arc<[Value; 2]>),
     /// Stored in place to avoid additional heap allocation.
-    Tuple3(Arc<(Value, Value, Value)>),
+    Tuple3(Arc<[Value; 3]>),
     /// Stores an arbitrarily large number of tuple values.
     Tuple4OrMore(Arc<Box<[Value]>>),
+
+    TypedTuple1(Arc<([StaticType; 1], [Value; 1])>),
+    TypedTuple2(Arc<([StaticType; 2], [Value; 2])>),
+    TypedTuple3(Arc<([StaticType; 3], [Value; 3])>),
+    TypedTuple4OrMore(Arc<(Box<[StaticType; 2]>, Box<[Value; 2]>)>),
 
     Boolean(bool),
 
@@ -70,6 +78,7 @@ enum ValueStorage {
 
     Char(char),
     String(Arc<String>),
+    StringSlice(Arc<(Arc<String>, (Option<usize>, Option<usize>))>),
 
     RangeFull,
     Range(Arc<StartEnd>),
@@ -78,32 +87,61 @@ enum ValueStorage {
     RangeInclusive(Arc<StartEnd>),
     RangeToInclusive(Arc<End>),
 
+    TypedRange(Arc<(StaticType, StartEnd)>),
+    TypedRangeFrom(Arc<(StaticType, Start)>),
+    TypedRangeTo(Arc<(StaticType, End)>),
+    TypedRangeInclusive(Arc<(StaticType, StartEnd)>),
+    TypedRangeToInclusive(Arc<(StaticType, End)>),
+
+    UnitStruct,
+    Struct1(Arc<Value>),
+    Struct2(Arc<[Value; 2]>),
+    Struct3(Arc<[Value; 3]>),
+    Struct4OrMore(Arc<Box<[Value]>>),
+
+    NamedStruct1(Arc<(NamedStruct, Value)>),
+    NamedStruct2(Arc<(NamedStruct, [Value; 2])>),
+    NamedStruct3(Arc<(NamedStruct, [Value; 3])>),
+    NamedStruct4OrMore(Arc<(NamedStruct, Box<[Value]>)>),
+
+    TypedStruct1(Arc<(TypedStruct, Value)>),
+    TypedStruct2(Arc<(TypedStruct, [Value; 2])>),
+    TypedStruct3(Arc<(TypedStruct, [Value; 3])>),
+    TypedStruct4OrMore(Arc<(TypedStruct, Box<[Value]>)>),
+
     // TODO: Optimized Array Types
-    Array(Arc<TypedArray>),
+    EmptyArray,
+    Array(Arc<Box<[Value]>>),
+    TypedArray(Arc<(StaticType, Box<[Value]>)>),
 
     // TODO: Optimized Vec Types
-    Vec(Arc<TypedVec>),
+    Vec(Arc<Vec<Value>>),
+    TypedVec(Arc<(StaticType, Vec<Value>)>),
 
     // TODO: Optimized Deque Types
-    Deque(Arc<TypedDeque>),
+    Deque(Arc<VecDeque<Value>>),
+    TypedDeque(Arc<(StaticType, VecDeque<Value>)>),
 
     // TODO: Optimized Set Types
-    Set(Arc<TypedSet>),
+    Set(Arc<BTreeSet<Value>>),
+    TypedSet(Arc<(StaticType, BTreeSet<Value>)>),
 
     // TODO: Optimized Map Types
-    Map(Arc<TypedMap>),
+    Map(Arc<BTreeMap<Value, Value>>),
+    TypedMap(Arc<(StaticType, StaticType, BTreeMap<Value, Value>)>),
 
     Function(Arc<Function>),
+    // TypedFunction(Arc<TypedFunction>),
     NativeFunction(NativeFunction),
+    // TypedNativeFunction(Arc<TypedNativeFunction>),
 
-    Struct(Arc<(Struct, Value)>),
-    UnitStruct(Arc<Struct>),
+    // TODO:
+    // UnitNewType(Arc<NewTypeId>),
+    // UnitStructNewType(Arc<NewTypeId>),
+    // NewType(Arc<(NewType, Value)>),
 
-    NewType(Arc<(NewType, Value)>),
-    UnitNewType(Arc<NewType>),
-
-    StructType(Arc<Struct>),
-    NewTypeType(Arc<NewType>),
+    // StructLayout(Arc<NamedStruct>),
+    // NewTypeType(Arc<NewType>),
     RuntimeType(Arc<RuntimeType>),
     StaticType(Arc<StaticType>),
     // ---
@@ -119,20 +157,23 @@ enum ValueStorage {
 impl Value {
     pub fn get_type(&self) -> RuntimeType {
         match &self.0 {
-            ValueStorage::Unit => RuntimeType::UNIT,
+            ValueStorage::Unit => RuntimeType::Unit,
 
-            ValueStorage::Tuple1(tuple) => RuntimeType::Tuple(vec![tuple.get_type().into()]),
+            ValueStorage::Tuple1(tuple) => RuntimeType::Tuple(Box::new([tuple[0].get_type()])),
             ValueStorage::Tuple2(tuple) => {
-                RuntimeType::Tuple(vec![tuple.0.get_type().into(), tuple.1.get_type().into()])
+                RuntimeType::Tuple(tuple.iter().map(Self::get_type).collect())
             }
-            ValueStorage::Tuple3(tuple) => RuntimeType::Tuple(vec![
-                tuple.0.get_type().into(),
-                tuple.1.get_type().into(),
-                tuple.2.get_type().into(),
-            ]),
+            ValueStorage::Tuple3(tuple) => {
+                RuntimeType::Tuple(tuple.iter().map(Self::get_type).collect())
+            }
             ValueStorage::Tuple4OrMore(tuple) => {
-                RuntimeType::Tuple(tuple.iter().map(|value| value.get_type().into()).collect())
+                RuntimeType::Tuple(tuple.iter().map(Self::get_type).collect())
             }
+
+            ValueStorage::TypedTuple1(tuple) => RuntimeType::TypedTuple(Box::new(tuple.0.clone())),
+            ValueStorage::TypedTuple2(tuple) => RuntimeType::TypedTuple(Box::new(tuple.0.clone())),
+            ValueStorage::TypedTuple3(tuple) => RuntimeType::TypedTuple(Box::new(tuple.0.clone())),
+            ValueStorage::TypedTuple4OrMore(tuple) => RuntimeType::TypedTuple(tuple.0.clone()),
 
             ValueStorage::Boolean(_) => RuntimeType::Boolean,
 
@@ -154,49 +195,63 @@ impl Value {
 
             ValueStorage::Char(_) => RuntimeType::Char,
             ValueStorage::String(_) => RuntimeType::String,
+            ValueStorage::StringSlice(_) => RuntimeType::StringSlice,
 
             ValueStorage::RangeFull => RuntimeType::RangeFull,
-            ValueStorage::Range(range) => RuntimeType::Range(range.get_type().into()),
-            ValueStorage::RangeFrom(range) => RuntimeType::RangeFrom(range.get_type().into()),
-            ValueStorage::RangeTo(range) => RuntimeType::RangeTo(range.get_type().into()),
+            ValueStorage::Range(range) => RuntimeType::Range(Box::new(range.get_type())),
+            ValueStorage::RangeFrom(range) => RuntimeType::RangeFrom(Box::new(range.get_type())),
+            ValueStorage::RangeTo(range) => RuntimeType::RangeTo(Box::new(range.get_type())),
             ValueStorage::RangeInclusive(range) => {
-                RuntimeType::RangeInclusive(range.get_type().into())
+                RuntimeType::RangeInclusive(Box::new(range.get_type()))
             }
             ValueStorage::RangeToInclusive(range) => {
-                RuntimeType::RangeToInclusive(range.get_type().into())
+                RuntimeType::RangeToInclusive(Box::new(range.get_type()))
             }
 
-            ValueStorage::Array(array) => RuntimeType::Array {
-                ty: array.get_type().clone(),
-                size: array.len(),
-            },
-            ValueStorage::Vec(vec) => RuntimeType::Vec(vec.get_type().clone()),
-            ValueStorage::Deque(deque) => RuntimeType::Deque(deque.get_type().clone()),
-            ValueStorage::Set(set) => RuntimeType::Set(set.get_type().clone()),
-            ValueStorage::Map(map) => RuntimeType::Map {
-                key: map.get_key_type().clone(),
-                value: map.get_value_type().clone(),
-            },
+            ValueStorage::TypedRange(range) => RuntimeType::TypedRange(range.0.clone()),
+            ValueStorage::TypedRangeFrom(range) => RuntimeType::TypedRange(range.0.clone()),
+            ValueStorage::TypedRangeTo(range) => RuntimeType::TypedRange(range.0.clone()),
+            ValueStorage::TypedRangeInclusive(range) => RuntimeType::TypedRange(range.0.clone()),
+            ValueStorage::TypedRangeToInclusive(range) => RuntimeType::TypedRange(range.0.clone()),
 
-            ValueStorage::Function(_) => RuntimeType::Function {
-                parameter_type: StaticType::ANY,
-                return_type: StaticType::ANY,
-            },
-            ValueStorage::NativeFunction(_) => RuntimeType::Function {
-                parameter_type: StaticType::ANY,
-                return_type: StaticType::ANY,
-            },
+            ValueStorage::UnitStruct => RuntimeType::UnitStruct,
 
-            ValueStorage::Struct(value) => RuntimeType::Struct(value.0.clone()),
-            ValueStorage::UnitStruct(value) => RuntimeType::Struct((**value).clone()),
+            ValueStorage::Struct1(_) => todo!(),
+            ValueStorage::Struct2(_) => todo!(),
+            ValueStorage::Struct3(_) => todo!(),
+            ValueStorage::Struct4OrMore(_) => todo!(),
 
-            ValueStorage::NewType(value) => RuntimeType::NewType(value.0.clone()),
-            ValueStorage::UnitNewType(value) => RuntimeType::NewType((**value).clone()),
+            ValueStorage::NamedStruct1(_) => todo!(),
+            ValueStorage::NamedStruct2(_) => todo!(),
+            ValueStorage::NamedStruct3(_) => todo!(),
+            ValueStorage::NamedStruct4OrMore(_) => todo!(),
 
-            ValueStorage::StructType(_) => RuntimeType::StructType,
-            ValueStorage::NewTypeType(_) => RuntimeType::NewTypeType,
-            ValueStorage::RuntimeType(_) => RuntimeType::RuntimeType,
-            ValueStorage::StaticType(_) => RuntimeType::StaticType,
+            ValueStorage::TypedStruct1(_) => todo!(),
+            ValueStorage::TypedStruct2(_) => todo!(),
+            ValueStorage::TypedStruct3(_) => todo!(),
+            ValueStorage::TypedStruct4OrMore(_) => todo!(),
+
+            ValueStorage::EmptyArray => todo!(),
+            ValueStorage::Array(_) => todo!(),
+            ValueStorage::TypedArray(_) => todo!(),
+
+            ValueStorage::Vec(_) => todo!(),
+            ValueStorage::TypedVec(_) => todo!(),
+
+            ValueStorage::Deque(_) => todo!(),
+            ValueStorage::TypedDeque(_) => todo!(),
+
+            ValueStorage::Set(_) => todo!(),
+            ValueStorage::TypedSet(_) => todo!(),
+
+            ValueStorage::Map(_) => todo!(),
+            ValueStorage::TypedMap(_) => todo!(),
+
+            ValueStorage::Function(_) => todo!(),
+            ValueStorage::NativeFunction(_) => todo!(),
+
+            ValueStorage::RuntimeType(_) => todo!(),
+            ValueStorage::StaticType(_) => todo!(),
         }
     }
 }

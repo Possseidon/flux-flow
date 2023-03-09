@@ -4,8 +4,8 @@ use crate::static_type::StaticType;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TypedVec {
-    pub(crate) ty: StaticType,
-    pub(crate) data: Vec<Value>,
+    pub ty: StaticType,
+    pub data: Vec<Value>,
 }
 
 impl TypedVec {

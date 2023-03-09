@@ -4,8 +4,8 @@ use crate::static_type::StaticType;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TypedArray {
-    pub(crate) ty: StaticType,
-    pub(crate) data: Box<[Value]>,
+    pub ty: StaticType,
+    pub data: Box<[Value]>,
 }
 
 impl TypedArray {

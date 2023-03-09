@@ -1,5 +1,7 @@
 use ordered_float::OrderedFloat;
 
+use crate::static_type::StaticType;
+
 use super::{Value, ValueStorage};
 
 macro_rules! impl_from_for {
@@ -49,6 +51,12 @@ macro_rules! impl_from_for {
 }
 
 pub type NativeFunction = fn(Value) -> Value;
+
+pub struct TypedNativeFunction {
+    argument_type: StaticType,
+    result_type: StaticType,
+    function: NativeFunction,
+}
 
 impl_from_for! {
     Boolean(bool),

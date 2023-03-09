@@ -1,5 +1,7 @@
 use std::{mem::take, sync::Arc};
 
+use crate::static_type::StaticType;
+
 use super::{primitives::NativeFunction, Value, ValueStorage};
 
 // TODO: Make sure the stack_frames shrinks_to_fit every now and then.
@@ -271,7 +273,7 @@ impl ExecutionEnvironment {
 /// the same as passing a tuple. This also opens up the possibility of named parameters by instead
 /// using an anonymous struct or even combining the two.
 ///
-/// If the instruction pointer is out of bounds, it is treated as a [`Instruction::Ret`].
+/// If the instruction pointer is out of bounds, it is treated as a [`Instruction::Return`].
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Function {
     pub instructions: Vec<Instruction>,
@@ -335,6 +337,7 @@ pub struct Generator {
 impl Function {
     fn halts_guaranteed(&self) -> bool {
         // TODO: Recursively check function calls.
+        //       Keep track of called functions and deal with potential recursion.
 
         self.instructions
             .iter()
@@ -361,4 +364,10 @@ impl Function {
                 | Instruction::Resume => false,
             })
     }
+}
+
+pub struct TypedFunction {
+    argument_type: StaticType,
+    result_type: StaticType,
+    function: Arc<Function>,
 }

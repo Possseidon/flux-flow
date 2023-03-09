@@ -6,9 +6,9 @@ use crate::static_type::StaticType;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TypedMap {
-    pub(crate) key: StaticType,
-    pub(crate) value: StaticType,
-    pub(crate) data: BTreeMap<Value, Value>,
+    pub key: StaticType,
+    pub value: StaticType,
+    pub data: BTreeMap<Value, Value>,
 }
 
 impl TypedMap {
