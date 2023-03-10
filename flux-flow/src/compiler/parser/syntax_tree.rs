@@ -74,7 +74,7 @@ macro_rules! rule {
     ( $grammar:ident $token_kind:ident ) => {
         Rule::Token(TokenKind::$token_kind)
     };
-    ( $grammar:ident ( ref $nodes:ident: $T:ty ) ) => {
+    ( $grammar:ident ( $nodes:ident: $T:ty ) ) => {
         Rule::Ref($grammar.rule::<$T>())
     };
 }
@@ -86,10 +86,10 @@ macro_rules! optional_rule {
     ( $grammar:ident [ $token_kind:ident ] ) => {
         OptionalRule::Optional(Rule::Token(TokenKind::$token_kind))
     };
-    ( $grammar:ident ( ref $nodes:ident: $T:ty ) ) => {
+    ( $grammar:ident ( $nodes:ident: $T:ty ) ) => {
         OptionalRule::Required(Rule::Ref($grammar.rule::<$T>()))
     };
-    ( $grammar:ident [ ref $nodes:ident: $T:ty ] ) => {
+    ( $grammar:ident [ $nodes:ident: $T:ty ] ) => {
         OptionalRule::Optional(Rule::Ref($grammar.rule::<$T>()))
     };
 }
@@ -101,10 +101,10 @@ macro_rules! field_type {
     ( [ $rule:ident ] ) => {
         Option<Token>
     };
-    ( ( ref $nodes:ident: $T:ty ) ) => {
+    ( ( $nodes:ident: $T:ty ) ) => {
         NodeRef
     };
-    ( [ ref $nodes:ident: $T:ty ] ) => {
+    ( [ $nodes:ident: $T:ty ] ) => {
         Option<NodeRef>
     };
 }
@@ -113,7 +113,7 @@ macro_rules! ref_field_type {
     ( $rule:ident ) => {
         Token
     };
-    ( ( ref $nodes:ident: $T:ty ) ) => {
+    ( ( $nodes:ident: $T:ty ) ) => {
         $T
     };
 }
@@ -129,12 +129,12 @@ macro_rules! field_accessor {
             self.$field
         }
     };
-    ( $field:ident ( ref $nodes:ident: $T:ty ) ) => {
+    ( $field:ident ( $nodes:ident: $T:ty ) ) => {
         pub fn $field<'a>(&self, syntax_tree: &'a SyntaxTree) -> &'a $T {
             &syntax_tree.nodes.$nodes[self.$field.0]
         }
     };
-    ( $field:ident [ ref $nodes:ident: $T:ty ] ) => {
+    ( $field:ident [ $nodes:ident: $T:ty ] ) => {
         pub fn $field<'a>(&self, syntax_tree: &'a SyntaxTree) -> Option<&'a $T> {
             self.$field.map(|NodeRef(i)| &syntax_tree.nodes.$nodes[i])
         }
@@ -197,7 +197,7 @@ macro_rules! concatenation {
 }
 
 macro_rules! alternation_ref {
-    ( $Ref:ident $syntax_tree:ident $node:ident $alternative:ident ( ref $nodes:ident: $T:ty ) ) => {
+    ( $Ref:ident $syntax_tree:ident $node:ident $alternative:ident ( $nodes:ident: $T:ty ) ) => {
         $Ref::$alternative(&$syntax_tree.nodes.$nodes[$node.0])
     };
     ( $Ref:ident $syntax_tree:ident $token:ident $alternative:ident $rule:ident ) => {
@@ -316,7 +316,7 @@ macro_rules! repetition_field_type {
     ( $rule:ident ) => {
         Vec<Token>
     };
-    ( ( ref $nodes:ident: $T:ty ) ) => {
+    ( ( $nodes:ident: $T:ty ) ) => {
         Vec<NodeRef>
     };
 }
@@ -327,7 +327,7 @@ macro_rules! repetition_accessor {
             &self.$field
         }
     };
-    ( $field:ident ( ref $nodes:ident: $T:ty ) ) => {
+    ( $field:ident ( $nodes:ident: $T:ty ) ) => {
         pub fn $field<'a>(
             &'a self,
             syntax_tree: &'a SyntaxTree,
@@ -484,7 +484,7 @@ token_alternation! { binary_operators: BinaryOperator {
     LogicOr: OrOr,
 } }
 
-braced_repetition!(blocks: Block => { statements: (ref statements: Statement) });
+braced_repetition!(blocks: Block => { statements: (statements: Statement) });
 
 token_alternation! { compound_assignment_operators: CompoundAssignmentOperator {
     // Math
@@ -503,74 +503,74 @@ token_alternation! { compound_assignment_operators: CompoundAssignmentOperator {
 } }
 
 alternation! { conditions: Condition ConditionImpl ConditionRef {
-    LetBinding: (ref let_bindings: LetBinding),
-    Expression: (ref expressions: Expression),
+    LetBinding: (let_bindings: LetBinding),
+    Expression: (expressions: Expression),
 } }
 
 concatenation! { else_blocks: ElseBlock {
     > else_kw: Else,
-    block: (ref blocks: Block),
+    block: (blocks: Block),
 } }
 
 concatenation! { else_if_blocks: ElseIfBlock {
     else_kw: Else,
     > if_kw: If,
-    condition: (ref conditions: Condition),
-    block: (ref blocks: Block),
+    condition: (conditions: Condition),
+    block: (blocks: Block),
 } }
 
-repetition!(else_if_chains: ElseIfChain => else_if_blocks: (ref else_if_blocks: ElseIfBlock));
+repetition!(else_if_chains: ElseIfChain => else_if_blocks: (else_if_blocks: ElseIfBlock));
 
 alternation! { expressions: Expression ExpressionImpl ExpressionRef {
-    Block: (ref blocks: Block),
-    IfBlock: (ref if_blocks: IfBlock),
-    WhileBlock: (ref while_blocks: WhileBlock),
-    ForBlock: (ref for_blocks: ForBlock),
-    LoopBlock: (ref loop_blocks: LoopBlock),
+    Block: (blocks: Block),
+    IfBlock: (if_blocks: IfBlock),
+    WhileBlock: (while_blocks: WhileBlock),
+    ForBlock: (for_blocks: ForBlock),
+    LoopBlock: (loop_blocks: LoopBlock),
 } }
 
 concatenation! { for_blocks: ForBlock {
     > for_kw: For,
-    pattern: (ref patterns: Pattern),
+    pattern: (patterns: Pattern),
     in_kw: In,
-    expression: (ref expressions: Expression),
-    block: (ref blocks: Block),
+    expression: (expressions: Expression),
+    block: (blocks: Block),
 } }
 
 concatenation! { functions: Function {
     pub_kw: [Pub],
     > fn_kw: Fn,
     name: Ident,
-    pattern: (ref patterns: Pattern),
-    return_type: [ref return_types: ReturnType],
-    block: (ref blocks: Block),
+    pattern: (patterns: Pattern),
+    return_type: [return_types: ReturnType],
+    block: (blocks: Block),
 } }
 
 concatenation! { if_blocks: IfBlock {
     > if_kw: If,
-    condition: (ref conditions: Condition),
-    block: (ref blocks: Block),
-    else_if_chain: (ref else_if_chains: ElseIfChain),
-    else_block: [ref else_blocks: ElseBlock],
+    condition: (conditions: Condition),
+    block: (blocks: Block),
+    else_if_chain: (else_if_chains: ElseIfChain),
+    else_block: [else_blocks: ElseBlock],
 } }
 
 alternation! { items: Item ItemImpl ItemRef {
-    Function: (ref functions: Function),
+    Function: (functions: Function),
 } }
 
 concatenation! { loop_blocks: LoopBlock {
     > loop_kw: Loop,
-    block: (ref blocks: Block),
+    block: (blocks: Block),
 } }
 
 concatenation! { let_bindings: LetBinding {
     > let_kw: Let,
-    pattern: (ref patterns: Pattern),
+    pattern: (patterns: Pattern),
     eq: Eq,
-    expression: (ref expressions: Expression),
+    expression: (expressions: Expression),
 } }
 
-global_repetition!(modules: Module => item: (ref items: Item));
+global_repetition!(modules: Module => item: (items: Item));
 
 alternation! { patterns: Pattern PatternImpl PatternRef {
     Discard: Underscore,
@@ -584,8 +584,8 @@ concatenation! { return_types: ReturnType {
 
 alternation! { statements: Statement StatementImpl StatementRef {
     Semi: Semi,
-    LetBinding: (ref let_bindings: LetBinding),
-    Expression: (ref expressions: Expression),
+    LetBinding: (let_bindings: LetBinding),
+    Expression: (expressions: Expression),
 } }
 
 token_alternation! { unary_operators: UnaryOperator {
@@ -595,6 +595,6 @@ token_alternation! { unary_operators: UnaryOperator {
 
 concatenation! { while_blocks: WhileBlock {
     > while_kw: While,
-    condition: (ref conditions: Condition),
-    block: (ref blocks: Block),
+    condition: (conditions: Condition),
+    block: (blocks: Block),
 } }
