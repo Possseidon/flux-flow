@@ -1,6 +1,9 @@
 use crate::compiler::lexer::TokenKind;
 
-use super::grammar::{Grammar, OptionalRule, Rule, RuleRef};
+use super::{
+    grammar::{Grammar, OptionalRule, Rule, RuleRef},
+    syntax_tree_node_builder::NodeBuilderStack,
+};
 
 #[derive(Debug)]
 pub struct ParseRequestStack(pub Vec<ParseRequest>);
@@ -22,7 +25,7 @@ pub struct Revert {
 #[derive(Clone, Copy, Debug)]
 pub struct BuildRequest {
     pub rule_ref: RuleRef,
-    pub node_builder_index: usize,
+    pub node_builder_stack: NodeBuilderStack,
     pub post_action: Option<BuildRequestPostAction>,
 }
 

@@ -37,7 +37,16 @@ pub enum NodeBuilderElement {
     Error,
 }
 
-impl NodeBuilderElement {
+#[derive(Clone, Copy, Debug)]
+enum CompactNodeBuilderElement {
+    NodeRef(NodeRef),
+    Token(Token),
+    Empty(usize),
+    Error(usize),
+    Separator(usize),
+}
+
+impl CompactNodeBuilderElement {
     fn is_root(self) -> bool {
         match self {
             Self::NodeRef(node_ref) => node_ref.is_root(),
@@ -48,7 +57,20 @@ impl NodeBuilderElement {
 
 #[derive(Debug, Default)]
 pub struct NodeBuilderInput {
-    pub stack: Vec<NodeBuilderElement>,
+    stack: Vec<CompactNodeBuilderElement>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NodeBuilderStack(usize);
+
+impl NodeBuilderStack {
+    fn separator(self) -> usize {
+        self.0
+    }
+
+    fn after_separator(self) -> usize {
+        self.0 + 1
+    }
 }
 
 impl NodeBuilderInput {
@@ -56,42 +78,53 @@ impl NodeBuilderInput {
         Self::default()
     }
 
-    pub fn len(&self) -> usize {
-        self.stack.len()
+    pub fn push_stack(&mut self) -> NodeBuilderStack {
+        if let Some(CompactNodeBuilderElement::Separator(count)) = self.stack.last_mut() {
+            *count += 1;
+            NodeBuilderStack(self.stack.len() - 1)
+        } else {
+            let separator = self.stack.len();
+            self.stack.push(CompactNodeBuilderElement::Separator(1));
+            NodeBuilderStack(separator)
+        }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn pop_stack(&mut self, index: usize) {
-        self.stack.drain(index..);
+    pub fn pop_stack(&mut self, stack: NodeBuilderStack) {
+        if let CompactNodeBuilderElement::Separator(count) = &mut self.stack[stack.separator()] {
+            if *count == 1 {
+                self.stack.drain(stack.separator()..);
+            } else {
+                *count -= 1;
+                self.stack.drain(stack.after_separator()..);
+            }
+        } else {
+            panic!("node builder stack should not contain a separator");
+        }
     }
 
     pub fn push(&mut self, element: NodeBuilderElement) {
-        self.stack.push(element);
-        // match element {
-        //     NodeBuilderElement::NodeRef(node_ref) => self
-        //         .stack
-        //         .push(CompactNodeBuilderElement::NodeRef(node_ref)),
-        //     NodeBuilderElement::Token(token) => {
-        //         self.stack.push(CompactNodeBuilderElement::Token(token))
-        //     }
-        //     NodeBuilderElement::Empty => {
-        //         if let Some(CompactNodeBuilderElement::Empty(last)) = self.stack.last_mut() {
-        //             *last += 1;
-        //         } else {
-        //             self.stack.push(CompactNodeBuilderElement::Empty(1));
-        //         }
-        //     }
-        //     NodeBuilderElement::Error => {
-        //         if let Some(CompactNodeBuilderElement::Error(last)) = self.stack.last_mut() {
-        //             *last += 1;
-        //         } else {
-        //             self.stack.push(CompactNodeBuilderElement::Error(1));
-        //         }
-        //     }
-        // }
+        match element {
+            NodeBuilderElement::NodeRef(node_ref) => self
+                .stack
+                .push(CompactNodeBuilderElement::NodeRef(node_ref)),
+            NodeBuilderElement::Token(token) => {
+                self.stack.push(CompactNodeBuilderElement::Token(token))
+            }
+            NodeBuilderElement::Empty => {
+                if let Some(CompactNodeBuilderElement::Empty(last)) = self.stack.last_mut() {
+                    *last += 1;
+                } else {
+                    self.stack.push(CompactNodeBuilderElement::Empty(1));
+                }
+            }
+            NodeBuilderElement::Error => {
+                if let Some(CompactNodeBuilderElement::Error(last)) = self.stack.last_mut() {
+                    *last += 1;
+                } else {
+                    self.stack.push(CompactNodeBuilderElement::Error(1));
+                }
+            }
+        }
     }
 
     pub fn final_check(mut self) {
@@ -102,6 +135,36 @@ impl NodeBuilderInput {
         assert!(element.is_root());
         assert!(self.stack.is_empty());
     }
+
+    pub fn visualize(&self, code: &str) {
+        print!("Nodes:");
+        for node in &self.stack {
+            match node {
+                CompactNodeBuilderElement::NodeRef(node_ref) => {
+                    print!(" {:?}", node_ref);
+                }
+                CompactNodeBuilderElement::Token(token) => {
+                    print!(" {}", &code[token.index..(token.index + token.len)]);
+                }
+                CompactNodeBuilderElement::Empty(count) => {
+                    for _ in 0..*count {
+                        print!(" empty");
+                    }
+                }
+                CompactNodeBuilderElement::Error(count) => {
+                    for _ in 0..*count {
+                        print!(" error");
+                    }
+                }
+                CompactNodeBuilderElement::Separator(count) => {
+                    for _ in 0..*count {
+                        print!(" >");
+                    }
+                }
+            };
+        }
+        println!();
+    }
 }
 
 #[derive(Debug)]
@@ -111,10 +174,13 @@ pub struct NodeBuilderReader<'a> {
 }
 
 impl<'a> NodeBuilderReader<'a> {
-    pub fn new(node_builder_input: &'a mut NodeBuilderInput, node_builder_index: usize) -> Self {
+    pub fn new(
+        node_builder_input: &'a mut NodeBuilderInput,
+        node_builder_stack: NodeBuilderStack,
+    ) -> Self {
         Self {
             node_builder_input,
-            node_builder_index,
+            node_builder_index: node_builder_stack.after_separator(),
         }
     }
 
@@ -127,33 +193,33 @@ impl<'a> NodeBuilderReader<'a> {
     }
 
     fn read_node(&mut self) -> NodeBuilderElement {
-        let old_index = self.node_builder_index;
-        self.node_builder_index += 1;
-        self.node_builder_input.stack[old_index]
-        // match &mut self.node_builder_input.stack[self.node_builder_index] {
-        //     CompactNodeBuilderElement::NodeRef(node_ref) => {
-        //         self.node_builder_index += 1;
-        //         NodeBuilderElement::NodeRef(*node_ref)
-        //     }
-        //     CompactNodeBuilderElement::Token(token) => {
-        //         self.node_builder_index += 1;
-        //         NodeBuilderElement::Token(*token)
-        //     }
-        //     CompactNodeBuilderElement::Empty(count) => {
-        //         *count -= 1;
-        //         if *count == 0 {
-        //             self.node_builder_index += 1;
-        //         }
-        //         NodeBuilderElement::Empty
-        //     }
-        //     CompactNodeBuilderElement::Error(count) => {
-        //         *count -= 1;
-        //         if *count == 0 {
-        //             self.node_builder_index += 1;
-        //         }
-        //         NodeBuilderElement::Error
-        //     }
-        // }
+        match &mut self.node_builder_input.stack[self.node_builder_index] {
+            CompactNodeBuilderElement::NodeRef(node_ref) => {
+                self.node_builder_index += 1;
+                NodeBuilderElement::NodeRef(*node_ref)
+            }
+            CompactNodeBuilderElement::Token(token) => {
+                self.node_builder_index += 1;
+                NodeBuilderElement::Token(*token)
+            }
+            CompactNodeBuilderElement::Empty(count) => {
+                *count -= 1;
+                if *count == 0 {
+                    self.node_builder_index += 1;
+                }
+                NodeBuilderElement::Empty
+            }
+            CompactNodeBuilderElement::Error(count) => {
+                *count -= 1;
+                if *count == 0 {
+                    self.node_builder_index += 1;
+                }
+                NodeBuilderElement::Error
+            }
+            CompactNodeBuilderElement::Separator(_) => {
+                panic!("reader should not contain separator")
+            }
+        }
     }
 }
 
