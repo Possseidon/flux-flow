@@ -18,23 +18,23 @@ struct SyntaxTreeNodes {
     binary_operator: Vec<BinaryOperator>,
     block: Vec<Block>,
     compound_assignment_operator: Vec<CompoundAssignmentOperator>,
-    expression: Vec<Expression>,
-    for_block: Vec<ForBlock>,
-    if_block: Vec<IfBlock>,
+    condition: Vec<Condition>,
+    else_block: Vec<ElseBlock>,
     else_if_block: Vec<ElseIfBlock>,
     else_if_chain: Vec<ElseIfChain>,
-    else_block: Vec<ElseBlock>,
-    while_block: Vec<WhileBlock>,
+    expression: Vec<Expression>,
+    for_block: Vec<ForBlock>,
     function: Vec<Function>,
-    condition: Vec<Condition>,
+    if_block: Vec<IfBlock>,
     item: Vec<Item>,
     let_binding: Vec<LetBinding>,
     loop_block: Vec<LoopBlock>,
     module: Vec<Module>,
-    statement: Vec<Statement>,
-    unary_operator: Vec<UnaryOperator>,
     pattern: Vec<Pattern>,
     return_type: Vec<ReturnType>,
+    statement: Vec<Statement>,
+    unary_operator: Vec<UnaryOperator>,
+    while_block: Vec<WhileBlock>,
 }
 
 impl SyntaxTree {
@@ -476,29 +476,15 @@ token_alternation! { compound_assignment_operator: CompoundAssignmentOperator {
     Shr: ShrEq,
 } }
 
-alternation! { expression: Expression ExpressionImpl ExpressionRef {
-    Block block: (ref Block),
-    IfBlock if_block: (ref IfBlock),
-    WhileBlock while_block: (ref WhileBlock),
-    ForBlock for_block: (ref ForBlock),
-    LoopBlock loop_block: (ref LoopBlock),
-} }
-
-alternation! { statement: Statement StatementImpl StatementRef {
-    Semi: Semi,
+alternation! { condition: Condition ConditionImpl ConditionRef {
     LetBinding let_binding: (ref LetBinding),
     Expression expression: (ref Expression),
 } }
 
-concatenation! { if_block: IfBlock {
-    > if_kw: If,
-    condition: (ref Condition),
+concatenation! { else_block: ElseBlock {
+    > else_kw: Else,
     block: (ref Block),
-    else_if_chain: (ref ElseIfChain),
-    else_block: [ref ElseBlock],
 } }
-
-repetition!(else_if_chain: ElseIfChain => else_if_block / else_if_blocks: (ref ElseIfBlock));
 
 concatenation! { else_if_block: ElseIfBlock {
     else_kw: Else,
@@ -507,30 +493,14 @@ concatenation! { else_if_block: ElseIfBlock {
     block: (ref Block),
 } }
 
-concatenation! { else_block: ElseBlock {
-    > else_kw: Else,
-    block: (ref Block),
-} }
+repetition!(else_if_chain: ElseIfChain => else_if_block / else_if_blocks: (ref ElseIfBlock));
 
-concatenation! { while_block: WhileBlock {
-    > while_kw: While,
-    condition: (ref Condition),
-    block: (ref Block),
-} }
-
-alternation! { condition: Condition ConditionImpl ConditionRef {
-    LetBinding let_binding: (ref LetBinding),
-    Expression expression: (ref Expression),
-} }
-
-alternation! { pattern: Pattern PatternImpl PatternRef {
-    Discard: Underscore,
-    Ident: Ident,
-} }
-
-concatenation! { loop_block: LoopBlock {
-    > loop_kw: Loop,
-    block: (ref Block),
+alternation! { expression: Expression ExpressionImpl ExpressionRef {
+    Block block: (ref Block),
+    IfBlock if_block: (ref IfBlock),
+    WhileBlock while_block: (ref WhileBlock),
+    ForBlock for_block: (ref ForBlock),
+    LoopBlock loop_block: (ref LoopBlock),
 } }
 
 concatenation! { for_block: ForBlock {
@@ -550,13 +520,21 @@ concatenation! { function: Function {
     block: (ref Block),
 } }
 
-concatenation! { return_type: ReturnType {
-    > r_arrow: RArrow,
-    return_type: Ident, // TODO: not just Ident
+concatenation! { if_block: IfBlock {
+    > if_kw: If,
+    condition: (ref Condition),
+    block: (ref Block),
+    else_if_chain: (ref ElseIfChain),
+    else_block: [ref ElseBlock],
 } }
 
 alternation! { item: Item ItemImpl ItemRef {
     Function function: (ref Function),
+} }
+
+concatenation! { loop_block: LoopBlock {
+    > loop_kw: Loop,
+    block: (ref Block),
 } }
 
 concatenation! { let_binding: LetBinding {
@@ -568,7 +546,29 @@ concatenation! { let_binding: LetBinding {
 
 global_repetition!(module: Module => item / items: (ref Item));
 
+alternation! { pattern: Pattern PatternImpl PatternRef {
+    Discard: Underscore,
+    Ident: Ident,
+} }
+
+concatenation! { return_type: ReturnType {
+    > r_arrow: RArrow,
+    return_type: Ident, // TODO: not just Ident
+} }
+
+alternation! { statement: Statement StatementImpl StatementRef {
+    Semi: Semi,
+    LetBinding let_binding: (ref LetBinding),
+    Expression expression: (ref Expression),
+} }
+
 token_alternation! { unary_operator: UnaryOperator {
     Neg: Minus,
     Not: Not,
+} }
+
+concatenation! { while_block: WhileBlock {
+    > while_kw: While,
+    condition: (ref Condition),
+    block: (ref Block),
 } }
