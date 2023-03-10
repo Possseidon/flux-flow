@@ -247,7 +247,7 @@ fn is_ident_char(char: char) -> bool {
 }
 
 fn find_line_break(current: &str) -> usize {
-    // TODO: Very inefficcient for '\r' only files.
+    // TODO: Very inefficient for '\r' only files.
     //       The first '\n' search will always search through the remainder of the entire file.
     current
         .find('\n')
