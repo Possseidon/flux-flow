@@ -89,6 +89,14 @@ impl TokenStream {
                     break Err(LexError::UnterminatedComment);
                 }
             })
+        } else if rest.starts_with(is_digit) {
+            // TODO: handle floats
+            // TODO: handle hex/oct/bin
+            let len = rest.find(|char| !is_digit(char)).unwrap_or(rest.len());
+            Some(Ok(Token {
+                token_kind: TokenKind::Integer,
+                len,
+            }))
         } else if rest.starts_with(is_ident_start_char) {
             let len = rest.find(|char| !is_ident_char(char)).unwrap_or(rest.len());
             if let Some(keyword) = self.keyword_token(&rest[0..len]) {
@@ -238,6 +246,10 @@ impl TokenStream {
     }
 }
 
+fn is_digit(char: char) -> bool {
+    char.is_ascii_digit()
+}
+
 fn is_ident_start_char(char: char) -> bool {
     char.is_ascii_alphabetic() || char == '_'
 }
@@ -370,7 +382,8 @@ tokens! {
     DocComment(TK_DOC_COMMENT) = "doc comment",
 
     Ident(TK_IDENT) = "identifier",
-    Number(TK_NUMBER) = "number",
+    Integer(TK_INTEGER) = "integer",
+    Float(TK_FLOAT) = "float",
     String(TK_STRING) = "string",
     Char(TK_CHAR) = "char",
     Label(TK_LABEL) = "label",
