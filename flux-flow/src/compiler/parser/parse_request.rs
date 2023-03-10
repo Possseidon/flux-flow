@@ -11,13 +11,19 @@ pub struct ParseRequestStack(pub Vec<ParseRequest>);
 #[derive(Clone, Copy, Debug)]
 pub enum BuildRequestPostAction {
     TreatMissingAsError,
-    Repeat(RepeatUntil),
+    Repeat(Repeat),
     Revert(Revert),
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct Repeat {
+    pub token_stream_index: usize,
+    pub repeat_until: RepeatUntil,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct Revert {
-    pub token_stream: Option<usize>,
+    pub token_stream_index: usize,
     pub alternations: bool,
     pub build_request: bool,
 }
@@ -26,7 +32,7 @@ pub struct Revert {
 pub struct BuildRequest {
     pub rule_ref: RuleRef,
     pub node_builder_stack: NodeBuilderStack,
-    pub post_action: Option<BuildRequestPostAction>,
+    pub post_action: BuildRequestPostAction,
 }
 
 #[derive(Clone, Copy, Debug)]

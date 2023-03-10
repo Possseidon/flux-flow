@@ -8,18 +8,18 @@ use std::ops::Range;
 use anyhow::anyhow;
 
 use crate::compiler::parser::{
-    parse_request::{BuildRequestPostAction, RepeatUntil},
-    syntax_tree::Module,
-    syntax_tree_node_builder::NodeBuilderError,
+    parse_request::ParseRequestStack, syntax_tree::Module,
+    syntax_tree_node_builder::NodeBuilderInput,
 };
 
 use self::{
     grammar::{Grammar, RecursiveRule, Rule, RuleRef},
     parse_request::{
-        BuildRequest, ParseMode, ParseRequest, ParseRequestStack, Revert, RuleRequest,
+        BuildRequest, BuildRequestPostAction, ParseMode, ParseRequest, Repeat, RepeatUntil, Revert,
+        RuleRequest,
     },
     syntax_tree::SyntaxTree,
-    syntax_tree_node_builder::{NodeBuilderElement, NodeBuilderInput, NodeBuilderReader},
+    syntax_tree_node_builder::{NodeBuilderElement, NodeBuilderError, NodeBuilderReader},
 };
 
 use super::{
@@ -116,35 +116,33 @@ impl ParseState {
 
     /// Pushes a build request with the given mode on the stack.
     fn push_build_request(&mut self, grammar: &Grammar, rule_ref: RuleRef, mode: ParseMode) {
-        self.parse_requests.push(ParseRequest::Build(BuildRequest {
+        let request = ParseRequest::Build(BuildRequest {
             rule_ref,
             node_builder_stack: self.node_builder_input.push_stack(),
             post_action: match mode {
-                ParseMode::Required => Some(BuildRequestPostAction::TreatMissingAsError),
-                ParseMode::Optional => None,
-                ParseMode::Essential => {
-                    let index = self.token_streams.len();
-                    self.token_streams.push(self.token_stream());
-                    Some(BuildRequestPostAction::Revert(Revert {
-                        token_stream: Some(index),
-                        alternations: false,
-                        build_request: true,
-                    }))
-                }
-                ParseMode::Repetition(repeat_until) => {
-                    Some(BuildRequestPostAction::Repeat(repeat_until))
-                }
-                ParseMode::Alternation => {
-                    let index = self.token_streams.len();
-                    self.token_streams.push(self.token_stream());
-                    Some(BuildRequestPostAction::Revert(Revert {
-                        token_stream: Some(index),
-                        alternations: true,
-                        build_request: false,
-                    }))
-                }
+                ParseMode::Required => BuildRequestPostAction::TreatMissingAsError,
+                ParseMode::Optional => BuildRequestPostAction::Revert(Revert {
+                    token_stream_index: self.push_token_stream(),
+                    alternations: false,
+                    build_request: false,
+                }),
+                ParseMode::Essential => BuildRequestPostAction::Revert(Revert {
+                    token_stream_index: self.push_token_stream(),
+                    alternations: false,
+                    build_request: true,
+                }),
+                ParseMode::Repetition(repeat_until) => BuildRequestPostAction::Repeat(Repeat {
+                    token_stream_index: self.push_token_stream(),
+                    repeat_until,
+                }),
+                ParseMode::Alternation => BuildRequestPostAction::Revert(Revert {
+                    token_stream_index: self.push_token_stream(),
+                    alternations: true,
+                    build_request: false,
+                }),
             },
-        }));
+        });
+        self.parse_requests.push(request);
 
         match &grammar.rule(rule_ref).rule {
             RecursiveRule::Concatenation {
@@ -198,6 +196,12 @@ impl ParseState {
         }
     }
 
+    fn push_token_stream(&mut self) -> usize {
+        let token_stream_index = self.token_streams.len();
+        self.token_streams.push(self.token_stream());
+        token_stream_index
+    }
+
     /// Parses a single token with the given mode.
     fn parse_token(
         &mut self,
@@ -229,7 +233,6 @@ impl ParseState {
             ) => self.node_builder_input.push(NodeBuilderElement::Empty),
 
             (token, ParseMode::Essential) => {
-                // TODO: add Option<Token> parameter for better error messages
                 self.revert_build_request(code, grammar, token_kind.name(), token);
             }
 
@@ -324,46 +327,42 @@ impl ParseState {
                     .push(NodeBuilderElement::NodeRef(node_ref));
 
                 match build_request.post_action {
-                    Some(BuildRequestPostAction::Repeat(repeat_until)) => {
+                    BuildRequestPostAction::TreatMissingAsError => {}
+                    BuildRequestPostAction::Repeat(repeat) => {
+                        self.commit_token_stream(repeat.token_stream_index);
                         self.push_build_request(
                             grammar,
                             build_request.rule_ref,
-                            ParseMode::Repetition(repeat_until),
+                            ParseMode::Repetition(repeat.repeat_until),
                         );
                     }
-                    Some(BuildRequestPostAction::Revert(revert)) => {
-                        if let Some(index) = revert.token_stream {
-                            let last_token_stream = self.token_stream();
-                            self.token_streams.drain(index..);
-                            *self.token_stream_mut() = last_token_stream;
-                        }
+                    BuildRequestPostAction::Revert(revert) => {
+                        self.commit_token_stream(revert.token_stream_index);
                         if revert.alternations {
                             self.parse_requests.pop_remaining_alternations();
                         }
                     }
-                    Some(BuildRequestPostAction::TreatMissingAsError) | None => {}
                 }
             }
             Ok(None) => {
                 assert!(reader_empty);
                 match build_request.post_action {
-                    Some(BuildRequestPostAction::TreatMissingAsError) => {
+                    BuildRequestPostAction::TreatMissingAsError => {
                         self.x_expected(named_rule.name);
                         self.node_builder_input.push(NodeBuilderElement::Error);
                     }
-                    Some(BuildRequestPostAction::Repeat(repeat_until)) => {
+                    BuildRequestPostAction::Repeat(repeat) => {
+                        self.revert_token_stream(repeat.token_stream_index);
                         self.process_mismatched_repetition_build_request(
                             code,
                             grammar,
-                            repeat_until,
+                            repeat.repeat_until,
                             named_rule.name,
                             build_request.rule_ref,
                         );
                     }
-                    Some(BuildRequestPostAction::Revert(revert)) => {
-                        if let Some(index) = revert.token_stream {
-                            self.token_streams.drain(index..);
-                        }
+                    BuildRequestPostAction::Revert(revert) => {
+                        self.revert_token_stream(revert.token_stream_index);
                         if revert.alternations {
                             self.parse_requests.pop_remaining_alternations();
                         }
@@ -374,15 +373,16 @@ impl ParseState {
                             self.node_builder_input.push(NodeBuilderElement::Empty);
                         }
                     }
-                    None => {
-                        self.node_builder_input.push(NodeBuilderElement::Empty);
-                    }
                 }
             }
             Err(NodeBuilderError) => match build_request.post_action {
-                Some(BuildRequestPostAction::Repeat(repeat_until)) => {
+                BuildRequestPostAction::TreatMissingAsError => {
+                    self.node_builder_input.push(NodeBuilderElement::Error);
+                }
+                BuildRequestPostAction::Repeat(repeat) => {
+                    self.commit_token_stream(repeat.token_stream_index);
                     if let Some(token) = self.next_token(code) {
-                        match repeat_until {
+                        match repeat.repeat_until {
                             RepeatUntil::Mismatch | RepeatUntil::EndOfTokenStream => {
                                 let TokenInfo { range, .. } = self.advance_token(code, token);
                                 self.x_expected_found_y_at(
@@ -394,19 +394,26 @@ impl ParseState {
                                 self.push_build_request(
                                     grammar,
                                     build_request.rule_ref,
-                                    ParseMode::Repetition(repeat_until),
+                                    ParseMode::Repetition(repeat.repeat_until),
                                 );
                             }
                             RepeatUntil::Token(repeat_until_token) => {
                                 if repeat_until_token == token.token_kind {
                                     self.node_builder_input.push(NodeBuilderElement::Empty)
                                 } else {
-                                    // This might endless loop?
-                                    // Might need to advance over the token in some cases.
+                                    // TODO: Is it okay to always advance here?
+                                    let TokenInfo { range, .. } = self.advance_token(code, token);
+                                    self.x_or_y_expected_found_z_at(
+                                        named_rule.name,
+                                        repeat_until_token.name(),
+                                        token.token_kind.name(),
+                                        range,
+                                    );
+
                                     self.push_build_request(
                                         grammar,
                                         build_request.rule_ref,
-                                        ParseMode::Repetition(repeat_until),
+                                        ParseMode::Repetition(repeat.repeat_until),
                                     );
                                 }
                             }
@@ -415,22 +422,25 @@ impl ParseState {
                         self.node_builder_input.push(NodeBuilderElement::Empty)
                     }
                 }
-                Some(BuildRequestPostAction::Revert(revert)) => {
-                    if let Some(index) = revert.token_stream {
-                        let last_token_stream = self.token_stream();
-                        self.token_streams.drain(index..);
-                        *self.token_stream_mut() = last_token_stream;
-                    }
+                BuildRequestPostAction::Revert(revert) => {
+                    self.commit_token_stream(revert.token_stream_index);
                     if revert.alternations {
                         self.parse_requests.pop_remaining_alternations();
                     }
                     self.node_builder_input.push(NodeBuilderElement::Error);
                 }
-                Some(BuildRequestPostAction::TreatMissingAsError) | None => {
-                    self.node_builder_input.push(NodeBuilderElement::Error);
-                }
             },
         }
+    }
+
+    fn commit_token_stream(&mut self, token_stream_index: usize) {
+        let last_token_stream = self.token_stream();
+        self.token_streams.drain(token_stream_index..);
+        *self.token_stream_mut() = last_token_stream;
+    }
+
+    fn revert_token_stream(&mut self, token_stream_index: usize) {
+        self.token_streams.drain(token_stream_index..);
     }
 
     fn revert_build_request(
@@ -445,17 +455,7 @@ impl ParseState {
             self.node_builder_input
                 .pop_stack(build_request.node_builder_stack);
             match build_request.post_action {
-                Some(BuildRequestPostAction::Revert(revert)) => {
-                    if let Some(index) = revert.token_stream {
-                        self.token_streams.drain(index..);
-                    }
-                    if revert.build_request {
-                        next_build_request = Some(self.parse_requests.pop_build_request());
-                    } else {
-                        self.node_builder_input.push(NodeBuilderElement::Empty);
-                    }
-                }
-                Some(BuildRequestPostAction::TreatMissingAsError) => {
+                BuildRequestPostAction::TreatMissingAsError => {
                     if let Some(token) = token {
                         self.x_expected_found_y(rule_name, token.token_kind.name());
                     } else {
@@ -463,16 +463,24 @@ impl ParseState {
                     }
                     self.node_builder_input.push(NodeBuilderElement::Empty);
                 }
-                Some(BuildRequestPostAction::Repeat(repeat_until)) => {
+                BuildRequestPostAction::Repeat(repeat) => {
+                    self.revert_token_stream(repeat.token_stream_index);
                     self.process_mismatched_repetition_build_request(
                         code,
                         grammar,
-                        repeat_until,
+                        repeat.repeat_until,
                         rule_name,
                         build_request.rule_ref,
                     );
                 }
-                None => self.node_builder_input.push(NodeBuilderElement::Empty),
+                BuildRequestPostAction::Revert(revert) => {
+                    self.revert_token_stream(revert.token_stream_index);
+                    if revert.build_request {
+                        next_build_request = Some(self.parse_requests.pop_build_request());
+                    } else {
+                        self.node_builder_input.push(NodeBuilderElement::Empty);
+                    }
+                }
             }
         }
     }

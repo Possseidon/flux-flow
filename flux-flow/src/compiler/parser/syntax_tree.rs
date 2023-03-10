@@ -45,9 +45,26 @@ struct SyntaxTreeNodes {
     statements: Vec<Statement>,
     suffix_operation_chains: Vec<SuffixOperationChain>,
     suffix_operations: Vec<SuffixOperation>,
+    type_expressions: Vec<TypeExpression>,
     types: Vec<Type>,
     unary_operators: Vec<UnaryOperator>,
     while_blocks: Vec<WhileBlock>,
+    tuple_literals: Vec<TupleLiteral>,
+    tuple_indices: Vec<TupleIndex>,
+    struct_field_names: Vec<StructFieldName>,
+    tuple_fields: Vec<TupleField>,
+    struct_fields: Vec<StructField>,
+    tuple_field_chains: Vec<TupleFieldChain>,
+    struct_field_chains: Vec<StructFieldChain>,
+    struct_literals: Vec<StructLiteral>,
+    trailing_comma_expressions: Vec<TrailingCommaExpression>,
+    map_entries: Vec<MapEntry>,
+    array_literals: Vec<ArrayLiteral>,
+    set_literals: Vec<SetLiteral>,
+    map_literals: Vec<MapLiteral>,
+    set_item_chains: Vec<SetItemChain>,
+    map_entry_chains: Vec<MapEntryChain>,
+    argument_expressions: Vec<ArgumentExpression>,
 }
 
 impl SyntaxTree {
@@ -637,18 +654,31 @@ concatenation! { return_types: ReturnType {
 } }
 
 alternation! { root_expressions: RootExpression RootExpressionImpl RootExpressionRef {
+    Block: (labeled_blocks: LabeledBlock),
+    Argument: (argument_expressions: ArgumentExpression),
+} }
+
+alternation! { argument_expressions: ArgumentExpression ArgumentExpressionImpl ArgumentExpressionRef {
     False: False,
     True: True,
+    Integer: Integer,
+    Float: Float,
     Ident: Ident,
+    Tuple: (tuple_literals: TupleLiteral),
+    Struct: (struct_literals: StructLiteral),
+    Array: (array_literals: ArrayLiteral),
+    Set: (set_literals: SetLiteral),
+    Map: (map_literals: MapLiteral),
     Return: (return_expressions: ReturnExpression),
     Break: (break_expressions: BreakExpression),
     Continue: (continue_expressions: ContinueExpression),
     Group: (group_expressions: GroupExpression),
-    Block: (labeled_blocks: LabeledBlock),
     IfBlock: (if_blocks: IfBlock),
     WhileBlock: (while_blocks: WhileBlock),
     ForBlock: (for_blocks: ForBlock),
     LoopBlock: (loop_blocks: LoopBlock),
+    // Type last, as it has overlap with literals which must be resolved using the `type` prefix.
+    Type: (type_expressions: TypeExpression),
 } }
 
 alternation! { statements: Statement StatementImpl StatementRef {
@@ -661,7 +691,12 @@ repetition!(suffix_operation_chains: SuffixOperationChain => operations: (suffix
 
 alternation! { suffix_operations: SuffixOperation SuffixOperationImpl SuffixOperationRef {
     Binary: (binary_operations: BinaryOperation),
-    Call: (expressions: Expression),
+    Call: (argument_expressions: ArgumentExpression),
+} }
+
+concatenation! { type_expressions: TypeExpression {
+    type_kw: [Type],
+    > ty: (types: Type),
 } }
 
 concatenation! { types: Type {
@@ -681,3 +716,69 @@ concatenation! { while_blocks: WhileBlock {
     condition: (conditions: Condition),
     block: (blocks: Block),
 } }
+
+//
+
+concatenation! { tuple_literals: TupleLiteral {
+    pound: Pound,
+    > content: (tuple_field_chains: TupleFieldChain),
+} }
+
+concatenation! { struct_literals: StructLiteral {
+    at: At,
+    > content: (struct_field_chains: StructFieldChain),
+} }
+
+concatenation! { set_literals: SetLiteral {
+    pound: Pound,
+    > content: (set_item_chains: SetItemChain),
+} }
+
+concatenation! { map_literals: MapLiteral {
+    at: At,
+    > content: (map_entry_chains: MapEntryChain),
+} }
+
+concatenation! { tuple_indices: TupleIndex {
+    index: Integer,
+    > colon: Colon,
+} }
+
+concatenation! { struct_field_names: StructFieldName {
+    name: Ident,
+    > colon: Colon,
+} }
+
+concatenation! { tuple_fields: TupleField {
+    index: [tuple_indices: TupleIndex],
+    > expression: (expressions: Expression),
+    comma: [Comma],
+} }
+
+concatenation! { struct_fields: StructField {
+    name: [struct_field_names: StructFieldName],
+    > expression: (expressions: Expression),
+    comma: [Comma],
+} }
+
+concatenation! { trailing_comma_expressions: TrailingCommaExpression {
+    > expression: (expressions: Expression),
+    comma: [Comma],
+} }
+
+concatenation! { map_entries: MapEntry {
+    key: (expressions: Expression),
+    > colon: Colon,
+    value: (expressions: Expression),
+    comma: [Comma],
+} }
+
+braced_repetition!(tuple_field_chains: TupleFieldChain => ( fields: (tuple_fields: TupleField) ));
+
+braced_repetition!(struct_field_chains: StructFieldChain => ( fields: (struct_fields: StructField) ));
+
+braced_repetition!(array_literals: ArrayLiteral => [ items: (trailing_comma_expressions: TrailingCommaExpression) ]);
+
+braced_repetition!(set_item_chains: SetItemChain => { items: (trailing_comma_expressions: TrailingCommaExpression) });
+
+braced_repetition!(map_entry_chains: MapEntryChain => { entries: (map_entries: MapEntry) });
