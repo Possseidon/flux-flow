@@ -155,6 +155,19 @@ macro_rules! concatenation {
             $( $required_fields: field_type!($RequiredFields), )*
         }
 
+        impl $T {
+            $( field_accessor!($essential_fields $EssentialFields); )*
+            field_accessor!($last_essential_field $LastEssentialField);
+            $( field_accessor!($required_fields $RequiredFields); )*
+
+            pub fn grammar() -> &'static Grammar {
+                lazy_static! {
+                    static ref GRAMMAR: Grammar = Grammar::new::<$T>();
+                }
+                &GRAMMAR
+            }
+        }
+
         impl Buildable for $T {
             fn name() -> &'static str {
                 stringify!($T)
@@ -180,12 +193,6 @@ macro_rules! concatenation {
                 });
                 Ok(Some(node_ref))
             }
-        }
-
-        impl $T {
-            $( field_accessor!($essential_fields $EssentialFields); )*
-            field_accessor!($last_essential_field $LastEssentialField);
-            $( field_accessor!($required_fields $RequiredFields); )*
         }
     };
 }
@@ -214,6 +221,13 @@ macro_rules! alternation {
                         alternation_ref!($Ref syntax_tree node_or_token $alternative $( $alternative_node )?)
                     } )*
                 }
+            }
+
+            pub fn grammar() -> &'static Grammar {
+                lazy_static! {
+                    static ref GRAMMAR: Grammar = Grammar::new::<$T>();
+                }
+                &GRAMMAR
             }
         }
 
@@ -261,6 +275,15 @@ macro_rules! token_alternation {
         #[derive(Debug)]
         pub enum $T {
             $( $alternative(field_type!($Alternative)), )*
+        }
+
+        impl $T {
+            pub fn grammar() -> &'static Grammar {
+                lazy_static! {
+                    static ref GRAMMAR: Grammar = Grammar::new::<$T>();
+                }
+                &GRAMMAR
+            }
         }
 
         impl Buildable for $T {
@@ -327,6 +350,13 @@ macro_rules! repetition_helper {
 
         impl $T {
             repetition_accessor!($field $fields $Field);
+
+            pub fn grammar() -> &'static Grammar {
+                lazy_static! {
+                    static ref GRAMMAR: Grammar = Grammar::new::<$T>();
+                }
+                &GRAMMAR
+            }
         }
 
         impl Buildable for $T {
@@ -383,6 +413,13 @@ macro_rules! braced_repetition_helper {
             pub fn $closing(&self) -> Token {
                 self.$closing
             }
+
+            pub fn grammar() -> &'static Grammar {
+                lazy_static! {
+                    static ref GRAMMAR: Grammar = Grammar::new::<$T>();
+                }
+                &GRAMMAR
+            }
         }
 
         impl Buildable for $T {
@@ -421,15 +458,6 @@ macro_rules! braced_repetition {
     ( $syntax_tree_name:ident: $T:ident => { $field:ident / $fields:ident: $Field:tt } ) => {
         braced_repetition_helper!($syntax_tree_name $T opening_curly closing_curly Curly $field $fields $Field);
     };
-}
-
-impl Module {
-    pub fn grammar() -> &'static Grammar {
-        lazy_static! {
-            static ref GRAMMAR: Grammar = Grammar::new::<Module>();
-        }
-        &GRAMMAR
-    }
 }
 
 token_alternation! { binary_operator: BinaryOperator {
