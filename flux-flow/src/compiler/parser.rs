@@ -14,7 +14,7 @@ use crate::compiler::parser::{
 };
 
 use self::{
-    grammar::{Grammar, NamedRule, RecursiveRule, Rule, RuleRef},
+    grammar::{Grammar, RecursiveRule, Rule, RuleRef},
     parse_request::{
         BuildRequest, ParseMode, ParseRequest, ParseRequestStack, Revert, RuleRequest,
     },
@@ -118,7 +118,7 @@ impl ParseState {
     fn push_build_request(&mut self, grammar: &Grammar, rule_ref: RuleRef, mode: ParseMode) {
         self.parse_requests.push(ParseRequest::Build(BuildRequest {
             rule_ref,
-            node_builder_index: self.node_builder_input.len(),
+            node_builder_stack: self.node_builder_input.push_stack(),
             post_action: match mode {
                 ParseMode::Required => Some(BuildRequestPostAction::TreatMissingAsError),
                 ParseMode::Optional => None,
@@ -310,12 +310,12 @@ impl ParseState {
         let named_rule = grammar.rule(build_request.rule_ref);
         let mut node_builder_reader = NodeBuilderReader::new(
             &mut self.node_builder_input,
-            build_request.node_builder_index,
+            build_request.node_builder_stack,
         );
         let node_ref = named_rule.builder.0(&mut self.syntax_tree, &mut node_builder_reader);
         let reader_empty = node_builder_reader.is_empty();
         self.node_builder_input
-            .pop_stack(build_request.node_builder_index);
+            .pop_stack(build_request.node_builder_stack);
 
         match node_ref {
             Ok(Some(node_ref)) => {
@@ -443,7 +443,7 @@ impl ParseState {
         let mut next_build_request = Some(self.parse_requests.pop_build_request());
         while let Some(build_request) = next_build_request.take() {
             self.node_builder_input
-                .pop_stack(build_request.node_builder_index);
+                .pop_stack(build_request.node_builder_stack);
             match build_request.post_action {
                 Some(BuildRequestPostAction::Revert(revert)) => {
                     if let Some(index) = revert.token_stream {
@@ -510,24 +510,7 @@ impl ParseState {
 
     #[allow(dead_code)]
     fn visualize(&self, code: &str, grammar: &Grammar) {
-        print!("Nodes:");
-        for node in &self.node_builder_input.stack {
-            match node {
-                NodeBuilderElement::NodeRef(node_ref) => {
-                    print!(" {:?}", node_ref);
-                }
-                NodeBuilderElement::Token(token) => {
-                    print!(" {}", &code[token.index..(token.index + token.len)]);
-                }
-                NodeBuilderElement::Empty => {
-                    print!(" empty");
-                }
-                NodeBuilderElement::Error => {
-                    print!(" error");
-                }
-            };
-        }
-        println!();
+        self.node_builder_input.visualize(code);
 
         print!("TokenStream at {}", self.token_stream().index());
 
