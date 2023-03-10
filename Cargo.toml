@@ -1,2 +1,2 @@
 [workspace]
-members = ["flux-flow", "flux-flow-macros"]
+members = ["flux-flow", "flux-flow-macros", "utils/*"]
