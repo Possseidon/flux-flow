@@ -33,6 +33,8 @@ struct SyntaxTreeNodes {
     module: Vec<Module>,
     statement: Vec<Statement>,
     unary_operator: Vec<UnaryOperator>,
+    pattern: Vec<Pattern>,
+    return_type: Vec<ReturnType>,
 }
 
 impl SyntaxTree {
@@ -521,6 +523,11 @@ alternation! { condition: Condition ConditionImpl ConditionRef {
     Expression expression: (ref Expression),
 } }
 
+alternation! { pattern: Pattern PatternImpl PatternRef {
+    Discard: Underscore,
+    Ident: Ident,
+} }
+
 concatenation! { loop_block: LoopBlock {
     > loop_kw: Loop,
     block: (ref Block),
@@ -528,9 +535,9 @@ concatenation! { loop_block: LoopBlock {
 
 concatenation! { for_block: ForBlock {
     > for_kw: For,
-    // TODO: pattern
+    pattern: (ref Pattern),
     in_kw: In,
-    // TODO: expression
+    expression: (ref Expression),
     block: (ref Block),
 } }
 
@@ -538,7 +545,14 @@ concatenation! { function: Function {
     pub_kw: [Pub],
     > fn_kw: Fn,
     name: Ident,
+    pattern: (ref Pattern),
+    return_type: [ref ReturnType],
     block: (ref Block),
+} }
+
+concatenation! { return_type: ReturnType {
+    > r_arrow: RArrow,
+    return_type: Ident, // TODO: not just Ident
 } }
 
 alternation! { item: Item ItemImpl ItemRef {
@@ -547,9 +561,9 @@ alternation! { item: Item ItemImpl ItemRef {
 
 concatenation! { let_binding: LetBinding {
     > let_kw: Let,
-    lhs: Ident,
+    pattern: (ref Pattern),
     eq: Eq,
-    rhs: Ident,
+    expression: (ref Expression),
 } }
 
 global_repetition!(module: Module => item / items: (ref Item));
