@@ -15,24 +15,37 @@ pub struct SyntaxTree {
 
 #[derive(Debug, Default)]
 struct SyntaxTreeNodes {
+    binary_operations: Vec<BinaryOperation>,
     binary_operators: Vec<BinaryOperator>,
     blocks: Vec<Block>,
-    compound_assignment_operators: Vec<CompoundAssignmentOperator>,
+    break_expressions: Vec<BreakExpression>,
     conditions: Vec<Condition>,
+    continue_expressions: Vec<ContinueExpression>,
     else_blocks: Vec<ElseBlock>,
     else_if_blocks: Vec<ElseIfBlock>,
     else_if_chains: Vec<ElseIfChain>,
     expressions: Vec<Expression>,
     for_blocks: Vec<ForBlock>,
     functions: Vec<Function>,
+    group_expressions: Vec<GroupExpression>,
     if_blocks: Vec<IfBlock>,
     items: Vec<Item>,
+    labeled_blocks: Vec<LabeledBlock>,
     let_bindings: Vec<LetBinding>,
     loop_blocks: Vec<LoopBlock>,
     modules: Vec<Module>,
+    path_resolution_chains: Vec<PathResolutionChain>,
+    path_resolutions: Vec<PathResolution>,
     patterns: Vec<Pattern>,
+    prefix_operation_chains: Vec<PrefixOperationChain>,
+    prefix_operations: Vec<PrefixOperation>,
+    return_expressions: Vec<ReturnExpression>,
     return_types: Vec<ReturnType>,
+    root_expressions: Vec<RootExpression>,
     statements: Vec<Statement>,
+    suffix_operation_chains: Vec<SuffixOperationChain>,
+    suffix_operations: Vec<SuffixOperation>,
+    types: Vec<Type>,
     unary_operators: Vec<UnaryOperator>,
     while_blocks: Vec<WhileBlock>,
 }
@@ -458,53 +471,65 @@ macro_rules! braced_repetition {
     };
 }
 
-token_alternation! { binary_operators: BinaryOperator {
-    // Math
-    Plus: Plus,
-    Minus: Minus,
-    Multiply: Star,
-    Divide: Slash,
-    Modulus: Percent,
+concatenation! { binary_operations: BinaryOperation {
+    > operator: (binary_operators: BinaryOperator),
+    expression: (expressions: Expression),
+} }
 
-    // Bit
+token_alternation! { binary_operators: BinaryOperator {
+    Add: Plus,
+    Sub: Minus,
+    Mul: Star,
+    Div: Slash,
+    Rem: Percent,
+
     BitAnd: And,
     BitOr: Or,
     BitXor: Caret,
     Shl: Shl,
     Shr: Shr,
 
-    // Logic
     Eq: EqEq,
     Ne: Ne,
     Gt: Gt,
     Lt: Lt,
     Ge: Ge,
     Le: Le,
-    LogicAnd: AndAnd,
-    LogicOr: OrOr,
+
+    And: AndAnd,
+    Or: OrOr,
+
+    Assign: Eq,
+
+    AddAssign: PlusEq,
+    SubAssign: MinusEq,
+    MulAssign: StarEq,
+    DivAssign: SlashEq,
+    RemAssign: PercentEq,
+
+    BitAndAssign: AndEq,
+    BitOrAssign: OrEq,
+    BitXorAssign: CaretEq,
+    ShlAssign: ShlEq,
+    ShrAssign: ShrEq,
 } }
 
 braced_repetition!(blocks: Block => { statements: (statements: Statement) });
 
-token_alternation! { compound_assignment_operators: CompoundAssignmentOperator {
-    // Math
-    Plus: PlusEq,
-    Minus: MinusEq,
-    Multiply: StarEq,
-    Divide: SlashEq,
-    Modulus: PercentEq,
-
-    // Bit
-    BitAnd: AndEq,
-    BitOr: OrEq,
-    BitXor: CaretEq,
-    Shl: ShlEq,
-    Shr: ShrEq,
+concatenation! { break_expressions: BreakExpression {
+    > break_kw: Break,
+    label: [Label],
+    expression: [expressions: Expression],
 } }
 
 alternation! { conditions: Condition ConditionImpl ConditionRef {
     LetBinding: (let_bindings: LetBinding),
     Expression: (expressions: Expression),
+} }
+
+concatenation! { continue_expressions: ContinueExpression {
+    > continue_kw: Continue,
+    label: [Label],
 } }
 
 concatenation! { else_blocks: ElseBlock {
@@ -521,15 +546,14 @@ concatenation! { else_if_blocks: ElseIfBlock {
 
 repetition!(else_if_chains: ElseIfChain => else_if_blocks: (else_if_blocks: ElseIfBlock));
 
-alternation! { expressions: Expression ExpressionImpl ExpressionRef {
-    Block: (blocks: Block),
-    IfBlock: (if_blocks: IfBlock),
-    WhileBlock: (while_blocks: WhileBlock),
-    ForBlock: (for_blocks: ForBlock),
-    LoopBlock: (loop_blocks: LoopBlock),
+concatenation! { expressions: Expression {
+    prefix_operation_chain: (prefix_operation_chains: PrefixOperationChain),
+    > root: (root_expressions: RootExpression),
+    suffix_operation_chain: (suffix_operation_chains: SuffixOperationChain),
 } }
 
 concatenation! { for_blocks: ForBlock {
+    label: [Label],
     > for_kw: For,
     pattern: (patterns: Pattern),
     in_kw: In,
@@ -546,6 +570,12 @@ concatenation! { functions: Function {
     block: (blocks: Block),
 } }
 
+concatenation! { group_expressions: GroupExpression {
+    > opening_paren: LParen,
+    expression: (expressions: Expression),
+    closing_paren: RParen,
+} }
+
 concatenation! { if_blocks: IfBlock {
     > if_kw: If,
     condition: (conditions: Condition),
@@ -558,9 +588,9 @@ alternation! { items: Item ItemImpl ItemRef {
     Function: (functions: Function),
 } }
 
-concatenation! { loop_blocks: LoopBlock {
-    > loop_kw: Loop,
-    block: (blocks: Block),
+concatenation! { labeled_blocks: LabeledBlock {
+    label: [Label],
+    > block: (blocks: Block),
 } }
 
 concatenation! { let_bindings: LetBinding {
@@ -570,16 +600,55 @@ concatenation! { let_bindings: LetBinding {
     expression: (expressions: Expression),
 } }
 
+concatenation! { loop_blocks: LoopBlock {
+    label: [Label],
+    > loop_kw: Loop,
+    block: (blocks: Block),
+} }
+
 global_repetition!(modules: Module => item: (items: Item));
+
+repetition!(path_resolution_chains: PathResolutionChain => chain: (path_resolutions: PathResolution));
+
+concatenation! { path_resolutions: PathResolution {
+    > path_sep: PathSep,
+    name: Ident,
+} }
 
 alternation! { patterns: Pattern PatternImpl PatternRef {
     Discard: Underscore,
     Ident: Ident,
 } }
 
+repetition!(prefix_operation_chains: PrefixOperationChain => operations: (prefix_operations: PrefixOperation));
+
+alternation! { prefix_operations: PrefixOperation PrefixOperationImpl PrefixOperationRef {
+    UnaryOperator: (unary_operators: UnaryOperator),
+} }
+
+concatenation! { return_expressions: ReturnExpression {
+    > return_kw: Return,
+    expression: [expressions: Expression],
+} }
+
 concatenation! { return_types: ReturnType {
     > r_arrow: RArrow,
-    return_type: Ident, // TODO: not just Ident
+    return_type: (types: Type),
+} }
+
+alternation! { root_expressions: RootExpression RootExpressionImpl RootExpressionRef {
+    False: False,
+    True: True,
+    Ident: Ident,
+    Return: (return_expressions: ReturnExpression),
+    Break: (break_expressions: BreakExpression),
+    Continue: (continue_expressions: ContinueExpression),
+    Group: (group_expressions: GroupExpression),
+    Block: (labeled_blocks: LabeledBlock),
+    IfBlock: (if_blocks: IfBlock),
+    WhileBlock: (while_blocks: WhileBlock),
+    ForBlock: (for_blocks: ForBlock),
+    LoopBlock: (loop_blocks: LoopBlock),
 } }
 
 alternation! { statements: Statement StatementImpl StatementRef {
@@ -588,12 +657,26 @@ alternation! { statements: Statement StatementImpl StatementRef {
     Expression: (expressions: Expression),
 } }
 
+repetition!(suffix_operation_chains: SuffixOperationChain => operations: (suffix_operations: SuffixOperation));
+
+alternation! { suffix_operations: SuffixOperation SuffixOperationImpl SuffixOperationRef {
+    Binary: (binary_operations: BinaryOperation),
+    Call: (expressions: Expression),
+} }
+
+concatenation! { types: Type {
+    leading_path_sep: [PathSep],
+    > name: Ident,
+    chain: (path_resolution_chains: PathResolutionChain),
+} }
+
 token_alternation! { unary_operators: UnaryOperator {
     Neg: Minus,
     Not: Not,
 } }
 
 concatenation! { while_blocks: WhileBlock {
+    label: [Label],
     > while_kw: While,
     condition: (conditions: Condition),
     block: (blocks: Block),
