@@ -1,3 +1,5 @@
+use std::{num::NonZeroUsize, ops::Range};
+
 use lazy_static::lazy_static;
 
 use crate::compiler::lexer::{BraceKind, TokenKind};
@@ -99,9 +101,168 @@ impl NodeRef {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Token {
+    // token_len first to allow size optimization for OptionalToken
+    pub token_len: NonZeroUsize,
+    pub token_start: usize,
+    pub trailing_whitespace_len: usize,
+}
+
+impl Token {
+    pub fn token_end(&self) -> usize {
+        self.token_start + self.token_len.get()
+    }
+
+    pub fn trailing_whitespace_start(&self) -> usize {
+        self.token_end()
+    }
+
+    pub fn trailing_whitespace_end(&self) -> usize {
+        self.trailing_whitespace_start() + self.trailing_whitespace_len
+    }
+
+    pub fn token(&self) -> Range<usize> {
+        self.token_start..self.token_end()
+    }
+
+    pub fn trailing_whitespace(&self) -> Range<usize> {
+        self.trailing_whitespace_start()..self.trailing_whitespace_end()
+    }
+
+    pub fn token_and_trailing_whitespace(&self) -> Range<usize> {
+        self.token_start..self.trailing_whitespace_end()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct EmptyToken {
     pub index: usize,
-    pub len: usize,
-    pub trailing_whitespace: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum OptionalToken {
+    Some(Token),
+    None(EmptyToken),
+}
+
+impl OptionalToken {
+    pub fn some(
+        token_start: usize,
+        token_len: NonZeroUsize,
+        trailing_whitespace_len: usize,
+    ) -> Self {
+        Self::Some(Token {
+            token_start,
+            token_len,
+            trailing_whitespace_len,
+        })
+    }
+
+    pub fn none(index: usize) -> Self {
+        Self::None(EmptyToken { index })
+    }
+
+    pub fn is_some(&self) -> bool {
+        matches!(self, Self::Some(..))
+    }
+
+    pub fn as_some(&self) -> Option<&Token> {
+        if let Self::Some(token) = self {
+            Some(token)
+        } else {
+            None
+        }
+    }
+
+    pub fn try_into_some(self) -> Result<Token, Self> {
+        if let Self::Some(token) = self {
+            Ok(token)
+        } else {
+            Err(self)
+        }
+    }
+
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None(..))
+    }
+
+    pub fn as_none(&self) -> Option<&EmptyToken> {
+        if let Self::None(empty_token) = self {
+            Some(empty_token)
+        } else {
+            None
+        }
+    }
+
+    pub fn try_into_none(self) -> Result<EmptyToken, Self> {
+        if let Self::None(empty_token) = self {
+            Ok(empty_token)
+        } else {
+            Err(self)
+        }
+    }
+
+    pub fn token_start(&self) -> usize {
+        match self {
+            OptionalToken::Some(token) => token.token_start,
+            OptionalToken::None(empty_token) => empty_token.index,
+        }
+    }
+
+    pub fn token_len(&self) -> usize {
+        match self {
+            OptionalToken::Some(token) => token.token_len.get(),
+            OptionalToken::None(..) => 0,
+        }
+    }
+
+    pub fn token_end(&self) -> usize {
+        match self {
+            OptionalToken::Some(token) => token.token_end(),
+            OptionalToken::None(empty_token) => empty_token.index,
+        }
+    }
+
+    pub fn trailing_whitespace_start(&self) -> usize {
+        match self {
+            OptionalToken::Some(token) => token.trailing_whitespace_start(),
+            OptionalToken::None(empty_token) => empty_token.index,
+        }
+    }
+
+    pub fn trailing_whitespace_len(&self) -> usize {
+        match self {
+            OptionalToken::Some(token) => token.trailing_whitespace_len,
+            OptionalToken::None(..) => 0,
+        }
+    }
+
+    pub fn trailing_whitespace_end(&self) -> usize {
+        match self {
+            OptionalToken::Some(token) => token.trailing_whitespace_end(),
+            OptionalToken::None(empty_token) => empty_token.index,
+        }
+    }
+
+    pub fn token(&self) -> Range<usize> {
+        match self {
+            OptionalToken::Some(token) => token.token(),
+            OptionalToken::None(empty_token) => empty_token.index..empty_token.index,
+        }
+    }
+
+    pub fn trailing_whitespace(&self) -> Range<usize> {
+        match self {
+            OptionalToken::Some(token) => token.trailing_whitespace(),
+            OptionalToken::None(empty_token) => empty_token.index..empty_token.index,
+        }
+    }
+
+    pub fn token_and_trailing_whitespace(&self) -> Range<usize> {
+        match self {
+            OptionalToken::Some(token) => token.token_and_trailing_whitespace(),
+            OptionalToken::None(empty_token) => empty_token.index..empty_token.index,
+        }
+    }
 }
 
 macro_rules! rule {
@@ -133,7 +294,7 @@ macro_rules! field_type {
         Token
     };
     ( [ $rule:ident ] ) => {
-        Option<Token>
+        OptionalToken
     };
     ( ( $nodes:ident: $T:ty ) ) => {
         NodeRef
@@ -159,7 +320,7 @@ macro_rules! field_accessor {
         }
     };
     ( $field:ident [ $rule:ident ] ) => {
-        pub fn $field(&self) -> Option<Token> {
+        pub fn $field(&self) -> OptionalToken {
             self.$field
         }
     };

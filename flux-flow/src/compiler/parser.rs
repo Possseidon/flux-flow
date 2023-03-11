@@ -18,7 +18,7 @@ use self::{
         BuildRequest, BuildRequestPostAction, ParseMode, ParseRequest, Repeat, RepeatUntil, Revert,
         RuleRequest,
     },
-    syntax_tree::SyntaxTree,
+    syntax_tree::{EmptyToken, SyntaxTree},
     syntax_tree_node_builder::{NodeBuilderElement, NodeBuilderError, NodeBuilderReader},
 };
 
@@ -223,14 +223,17 @@ impl ParseState {
             {
                 self.node_builder_input.push(NodeBuilderElement::Empty)
             }
+            (_, ParseMode::Optional) => {
+                self.node_builder_input
+                    .push(NodeBuilderElement::EmptyToken(EmptyToken {
+                        index: self.token_stream().index(),
+                    }))
+            }
             (Some(_), ParseMode::Repetition(RepeatUntil::Mismatch))
             | (None, ParseMode::Repetition(RepeatUntil::EndOfTokenStream))
-            | (
-                _,
-                ParseMode::Optional
-                | ParseMode::Alternation
-                | ParseMode::Repetition(RepeatUntil::Mismatch),
-            ) => self.node_builder_input.push(NodeBuilderElement::Empty),
+            | (_, ParseMode::Alternation | ParseMode::Repetition(RepeatUntil::Mismatch)) => {
+                self.node_builder_input.push(NodeBuilderElement::Empty)
+            }
 
             (token, ParseMode::Essential) => {
                 self.revert_build_request(code, grammar, token_kind.name(), token);
@@ -294,13 +297,13 @@ impl ParseState {
     fn advance_token_and_push(&mut self, code: &str, token: lexer::Token) {
         let TokenInfo {
             range,
-            trailing_whitespace,
+            trailing_whitespace: trailing_whitespace_len,
         } = self.advance_token(code, token);
         self.node_builder_input
             .push(NodeBuilderElement::Token(syntax_tree::Token {
-                index: range.start,
-                len: token.len,
-                trailing_whitespace,
+                token_len: token.len,
+                token_start: range.start,
+                trailing_whitespace_len,
             }));
     }
 
@@ -504,7 +507,7 @@ impl ParseState {
     /// In case of backtracking, only the first instance of the error is added as diagnostic.
     fn process_lex_error(&mut self, code: &str, error: LexError) {
         let index = self.token_stream().index();
-        let end = index + self.token_stream_mut().advance_error(code, &error);
+        let end = index + self.token_stream_mut().advance_error(code, &error).get();
         self.token_stream_mut().skip_whitespace_tokens(code);
 
         if self
