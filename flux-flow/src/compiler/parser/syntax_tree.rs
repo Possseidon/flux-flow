@@ -21,10 +21,14 @@ pub struct SyntaxTree {
 struct SyntaxTreeNodes {
     argument_expressions: Vec<ArgumentExpression>,
     array_literals: Vec<ArrayLiteral>,
+    array_updaters: Vec<ArrayUpdater>,
     binary_operations: Vec<BinaryOperation>,
     binary_operators: Vec<BinaryOperator>,
     blocks: Vec<Block>,
     break_expressions: Vec<BreakExpression>,
+    collection_modifier_chains: Vec<CollectionModifierChain>,
+    collection_modifier_kinds: Vec<CollectionModifierKind>,
+    collection_modifiers: Vec<CollectionModifier>,
     conditions: Vec<Condition>,
     continue_expressions: Vec<ContinueExpression>,
     else_blocks: Vec<ElseBlock>,
@@ -35,11 +39,14 @@ struct SyntaxTreeNodes {
     functions: Vec<Function>,
     group_expressions: Vec<GroupExpression>,
     if_blocks: Vec<IfBlock>,
+    index_expressions: Vec<IndexExpression>,
+    index_operations: Vec<IndexOperation>,
+    index_operators: Vec<IndexOperator>,
     items: Vec<Item>,
+    key_values: Vec<KeyValue>,
     labeled_blocks: Vec<LabeledBlock>,
     let_bindings: Vec<LetBinding>,
     loop_blocks: Vec<LoopBlock>,
-    map_entries: Vec<MapEntry>,
     map_entry_chains: Vec<MapEntryChain>,
     map_literals: Vec<MapLiteral>,
     match_arms: Vec<MatchArm>,
@@ -48,12 +55,14 @@ struct SyntaxTreeNodes {
     modules: Vec<Module>,
     path_resolution_chains: Vec<PathResolutionChain>,
     path_resolutions: Vec<PathResolution>,
+    paths: Vec<Path>,
     patterns: Vec<Pattern>,
     prefix_operation_chains: Vec<PrefixOperationChain>,
     prefix_operations: Vec<PrefixOperation>,
     return_expressions: Vec<ReturnExpression>,
     return_types: Vec<ReturnType>,
     root_expressions: Vec<RootExpression>,
+    root_types: Vec<RootType>,
     set_item_chains: Vec<SetItemChain>,
     set_literals: Vec<SetLiteral>,
     statements: Vec<Statement>,
@@ -793,7 +802,7 @@ alternation! { argument_expressions: ArgumentExpression ArgumentExpressionImpl A
     True: True,
     Integer: Integer,
     Float: Float,
-    Ident: Ident,
+    Path: (paths: Path),
     Tuple: (tuple_literals: TupleLiteral),
     Struct: (struct_literals: StructLiteral),
     Array: (array_literals: ArrayLiteral),
@@ -803,16 +812,18 @@ alternation! { argument_expressions: ArgumentExpression ArgumentExpressionImpl A
     Break: (break_expressions: BreakExpression),
     Continue: (continue_expressions: ContinueExpression),
     Group: (group_expressions: GroupExpression),
-    IfBlock: (if_blocks: IfBlock),
-    WhileBlock: (while_blocks: WhileBlock),
-    ForBlock: (for_blocks: ForBlock),
-    LoopBlock: (loop_blocks: LoopBlock),
-    MatchBlock: (match_blocks: MatchBlock),
+    If: (if_blocks: IfBlock),
+    While: (while_blocks: WhileBlock),
+    For: (for_blocks: ForBlock),
+    Loop: (loop_blocks: LoopBlock),
+    Match: (match_blocks: MatchBlock),
     // Type last, as it has overlap with literals which must be resolved using the `type` prefix.
     Type: (type_expressions: TypeExpression),
 } }
 
 braced_repetition!(array_literals: ArrayLiteral => [ items: (trailing_comma_expressions: TrailingCommaExpression) ]);
+
+braced_repetition!(array_updaters: ArrayUpdater => [ assignments: (key_values: KeyValue) ]);
 
 concatenation! { binary_operations: BinaryOperation {
     > operator: (binary_operators: BinaryOperator),
@@ -859,6 +870,21 @@ concatenation! { break_expressions: BreakExpression {
     expression: [expressions: Expression],
 } }
 
+concatenation! { collection_modifiers: CollectionModifier {
+    > opening_brack: LBrack,
+    kind: [collection_modifier_kinds: CollectionModifierKind],
+    closing_brack: RBrack,
+}}
+
+repetition!(collection_modifier_chains: CollectionModifierChain => modifiers: (collection_modifiers: CollectionModifier));
+
+alternation! { collection_modifier_kinds: CollectionModifierKind CollectionModifierKindImpl CollectionModifierKindRef {
+    Array: Integer,
+    Deque: Tilde,
+    Set: Lt,
+    Map: (types: Type),
+} }
+
 alternation! { conditions: Condition ConditionImpl ConditionRef {
     LetBinding: (let_bindings: LetBinding),
     Expression: (expressions: Expression),
@@ -884,9 +910,9 @@ concatenation! { else_if_blocks: ElseIfBlock {
 repetition!(else_if_chains: ElseIfChain => else_if_blocks: (else_if_blocks: ElseIfBlock));
 
 concatenation! { expressions: Expression {
-    prefix_operation_chain: (prefix_operation_chains: PrefixOperationChain),
+    prefix: (prefix_operation_chains: PrefixOperationChain),
     > root: (root_expressions: RootExpression),
-    suffix_operation_chain: (suffix_operation_chains: SuffixOperationChain),
+    suffix: (suffix_operation_chains: SuffixOperationChain),
 } }
 
 concatenation! { for_blocks: ForBlock {
@@ -921,8 +947,33 @@ concatenation! { if_blocks: IfBlock {
     else_block: [else_blocks: ElseBlock],
 } }
 
+alternation! { index_expressions: IndexExpression IndexExpressionImpl IndexExpressionRef {
+    Name: Ident,
+    TupleUpdate: (tuple_literals: TupleLiteral),
+    StructUpdate: (struct_literals: StructLiteral),
+    ArrayUpdate: (array_updaters: ArrayUpdater),
+    MapUpdate: (map_literals: MapLiteral),
+} }
+
+concatenation! { index_operations: IndexOperation {
+    > operator: (index_operators: IndexOperator),
+    expression: (index_expressions: IndexExpression),
+} }
+
+token_alternation! { index_operators: IndexOperator {
+    Dot: Dot,
+    DotAssign: DotEq,
+} }
+
 alternation! { items: Item ItemImpl ItemRef {
     Function: (functions: Function),
+} }
+
+concatenation! { key_values: KeyValue {
+    > key: (expressions: Expression),
+    colon: Colon,
+    value: (expressions: Expression),
+    comma: [Comma],
 } }
 
 concatenation! { labeled_blocks: LabeledBlock {
@@ -943,14 +994,7 @@ concatenation! { loop_blocks: LoopBlock {
     block: (blocks: Block),
 } }
 
-concatenation! { map_entries: MapEntry {
-    key: (expressions: Expression),
-    > colon: Colon,
-    value: (expressions: Expression),
-    comma: [Comma],
-} }
-
-braced_repetition!(map_entry_chains: MapEntryChain => { entries: (map_entries: MapEntry) });
+braced_repetition!(map_entry_chains: MapEntryChain => { entries: (key_values: KeyValue) });
 
 concatenation! { map_literals: MapLiteral {
     at: At,
@@ -972,7 +1016,13 @@ concatenation! { match_blocks: MatchBlock {
 
 braced_repetition!(match_bodies: MatchBody => { arms: (match_arms: MatchArm) });
 
-global_repetition!(modules: Module => item: (items: Item));
+global_repetition!(modules: Module => items: (items: Item));
+
+concatenation! { paths: Path {
+    leading_path_sep: [PathSep],
+    > name: Ident,
+    chain: (path_resolution_chains: PathResolutionChain),
+} }
 
 concatenation! { path_resolutions: PathResolution {
     > path_sep: PathSep,
@@ -999,12 +1049,20 @@ concatenation! { return_expressions: ReturnExpression {
 
 concatenation! { return_types: ReturnType {
     > r_arrow: RArrow,
-    return_type: (types: Type),
+    ty: (types: Type),
 } }
 
 alternation! { root_expressions: RootExpression RootExpressionImpl RootExpressionRef {
     Block: (labeled_blocks: LabeledBlock),
     Argument: (argument_expressions: ArgumentExpression),
+} }
+
+alternation! { root_types: RootType RootTypeImpl RootTypeRef {
+    Deduce: Underscore,
+    Never: Not,
+    Path: (paths: Path),
+    // Tuple: (tuple_types: TupleType),
+    // Struct: (struct_types: StructType),
 } }
 
 braced_repetition!(set_item_chains: SetItemChain => { items: (trailing_comma_expressions: TrailingCommaExpression) });
@@ -1039,12 +1097,13 @@ concatenation! { struct_literals: StructLiteral {
 } }
 
 concatenation! { suffix_expressions: SuffixExpression {
-    prefix_operation_chain: (prefix_operation_chains: PrefixOperationChain),
+    prefix: (prefix_operation_chains: PrefixOperationChain),
     > root: (root_expressions: RootExpression),
 } }
 
 alternation! { suffix_operations: SuffixOperation SuffixOperationImpl SuffixOperationRef {
     Binary: (binary_operations: BinaryOperation),
+    Index: (index_operations: IndexOperation),
     Call: (argument_expressions: ArgumentExpression),
 } }
 
@@ -1074,14 +1133,13 @@ concatenation! { tuple_literals: TupleLiteral {
 } }
 
 concatenation! { types: Type {
-    leading_path_sep: [PathSep],
-    > name: Ident,
-    chain: (path_resolution_chains: PathResolutionChain),
+    collection_modifiers: (collection_modifier_chains: CollectionModifierChain),
+    > root: (root_types: RootType),
 } }
 
 concatenation! { type_expressions: TypeExpression {
-    type_kw: [Type],
-    > ty: (types: Type),
+    > type_kw: Type,
+    path: (paths: Path),
 } }
 
 token_alternation! { unary_operators: UnaryOperator {
