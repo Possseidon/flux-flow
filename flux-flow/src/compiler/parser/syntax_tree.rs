@@ -9,6 +9,8 @@ use super::{
     syntax_tree_node_builder::{Buildable, NodeBuilderError, NodeBuilderReader},
 };
 
+// TODO: Don't create node refs for empty repetitions.
+
 #[derive(Debug)]
 pub struct SyntaxTree {
     initial_whitespace: usize,
