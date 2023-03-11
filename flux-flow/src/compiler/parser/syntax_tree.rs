@@ -57,6 +57,7 @@ struct SyntaxTreeNodes {
     struct_field_names: Vec<StructFieldName>,
     struct_fields: Vec<StructField>,
     struct_literals: Vec<StructLiteral>,
+    suffix_expressions: Vec<SuffixExpression>,
     suffix_operation_chains: Vec<SuffixOperationChain>,
     suffix_operations: Vec<SuffixOperation>,
     trailing_comma_expressions: Vec<TrailingCommaExpression>,
@@ -519,7 +520,7 @@ braced_repetition!(array_literals: ArrayLiteral => [ items: (trailing_comma_expr
 
 concatenation! { binary_operations: BinaryOperation {
     > operator: (binary_operators: BinaryOperator),
-    expression: (expressions: Expression),
+    expression: (suffix_expressions: SuffixExpression),
 } }
 
 token_alternation! { binary_operators: BinaryOperator {
@@ -739,6 +740,11 @@ concatenation! { struct_field_names: StructFieldName {
 concatenation! { struct_literals: StructLiteral {
     at: At,
     > content: (struct_field_chains: StructFieldChain),
+} }
+
+concatenation! { suffix_expressions: SuffixExpression {
+    prefix_operation_chain: (prefix_operation_chains: PrefixOperationChain),
+    > root: (root_expressions: RootExpression),
 } }
 
 alternation! { suffix_operations: SuffixOperation SuffixOperationImpl SuffixOperationRef {
