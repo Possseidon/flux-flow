@@ -90,6 +90,10 @@ impl SyntaxTree {
     pub fn root_module(&self) -> &Module {
         self.nodes.modules.last().expect("root module should exist")
     }
+
+    pub fn visualize(&self, code: &str) {
+        self.root_module().visualize(self, code, 0, false);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,6 +136,21 @@ impl Token {
 
     pub fn token_and_trailing_whitespace(&self) -> Range<usize> {
         self.token_start..self.trailing_whitespace_end()
+    }
+
+    pub fn visualize(
+        &self,
+        _syntax_tree: &SyntaxTree,
+        code: &str,
+        indent: usize,
+        with_indent: bool,
+    ) {
+        println!(
+            "{: <2$}`{}`",
+            "",
+            &code[self.token()],
+            if with_indent { indent } else { 0 }
+        );
     }
 }
 
@@ -265,6 +284,23 @@ impl OptionalToken {
             OptionalToken::None(empty_token) => empty_token.index..empty_token.index,
         }
     }
+
+    pub fn visualize(
+        &self,
+        syntax_tree: &SyntaxTree,
+        code: &str,
+        indent: usize,
+        with_indent: bool,
+    ) {
+        match self {
+            OptionalToken::Some(token) => token.visualize(syntax_tree, code, indent, with_indent),
+            OptionalToken::None(_) => println!("n/a"),
+        }
+    }
+}
+
+fn print_indent(indent: usize) {
+    print!("{: <1$}", "", indent);
 }
 
 macro_rules! rule {
@@ -338,6 +374,25 @@ macro_rules! field_accessor {
     };
 }
 
+macro_rules! visualize {
+    ( $syntax_tree:ident $code:ident $indent:tt $with_indent:tt $field:tt $rule:ident ) => {
+        $field.visualize($syntax_tree, $code, $indent, $with_indent);
+    };
+    ( $syntax_tree:ident $code:ident $indent:tt $with_indent:tt $field:tt [ $rule:ident ] ) => {
+        $field.visualize($syntax_tree, $code, $indent, $with_indent);
+    };
+    ( $syntax_tree:ident $code:ident $indent:tt $with_indent:tt $field:tt ( $nodes:ident: $T:ty ) ) => {
+        $syntax_tree.nodes.$nodes[$field.0].visualize($syntax_tree, $code, $indent, $with_indent);
+    };
+    ( $syntax_tree:ident $code:ident $indent:tt $with_indent:tt $field:tt [ $nodes:ident: $T:ty ] ) => {
+        if let Some(NodeRef(i)) = $field {
+            $syntax_tree.nodes.$nodes[i].visualize($syntax_tree, $code, $indent, $with_indent);
+        } else {
+            println!("n/a");
+        }
+    };
+}
+
 macro_rules! concatenation {
     { $syntax_tree_name:ident: $T:ident {
         $( $essential_fields:ident: $EssentialFields:tt, )*
@@ -361,6 +416,21 @@ macro_rules! concatenation {
                     static ref GRAMMAR: Grammar = Grammar::new::<$T>();
                 }
                 &GRAMMAR
+            }
+
+            pub fn visualize(
+                &self,
+                syntax_tree: &SyntaxTree,
+                code: &str,
+                mut indent: usize,
+                with_indent: bool,
+            ) {
+                if with_indent { print_indent(indent); }
+                println!("{}", <Self as Buildable>::name());
+                indent += 1;
+                $( print_indent(indent); print!("{}: ", stringify!($essential_fields)); visualize!(syntax_tree code indent false (self.$essential_fields) $EssentialFields); )*
+                print_indent(indent); print!("{}: ", stringify!($last_essential_field)); visualize!(syntax_tree code indent false (self.$last_essential_field) $LastEssentialField);
+                $( print_indent(indent); print!("{}: ", stringify!($required_fields)); visualize!(syntax_tree code indent false (self.$required_fields) $RequiredFields); )*
             }
         }
 
@@ -424,6 +494,23 @@ macro_rules! alternation {
                 }
                 &GRAMMAR
             }
+
+            pub fn visualize(
+                &self,
+                syntax_tree: &SyntaxTree,
+                code: &str,
+                indent: usize,
+                with_indent: bool,
+            ) {
+                if with_indent { print_indent(indent); }
+                print!("{}::", <Self as Buildable>::name());
+                match &self.0 {
+                    $( $Impl::$alternative(node_or_token) => {
+                        print!("{} > ", stringify!($alternative));
+                        visualize!(syntax_tree code indent false node_or_token $Alternative);
+                    } )*
+                }
+            }
         }
 
         impl Buildable for $T {
@@ -478,6 +565,22 @@ macro_rules! token_alternation {
                     static ref GRAMMAR: Grammar = Grammar::new::<$T>();
                 }
                 &GRAMMAR
+            }
+
+            pub fn visualize(
+                &self,
+                syntax_tree: &SyntaxTree,
+                code: &str,
+                indent: usize,
+                with_indent: bool,
+            ) {
+                if with_indent { print_indent(indent); }
+                print!("{}: ", <Self as Buildable>::name());
+                match &self {
+                    $( Self::$alternative(node_or_token) => {
+                        visualize!(syntax_tree code indent false node_or_token $Alternative);
+                    } )*
+                }
             }
         }
 
@@ -552,6 +655,21 @@ macro_rules! repetition_helper {
                 }
                 &GRAMMAR
             }
+
+            pub fn visualize(
+                &self,
+                syntax_tree: &SyntaxTree,
+                code: &str,
+                indent: usize,
+                with_indent: bool,
+            ) {
+                if with_indent { print_indent(indent); }
+                print!("{}", <Self as Buildable>::name());
+                println!("[{}]", self.$field.len());
+                for field in &self.$field {
+                    visualize!(syntax_tree code (indent + 1) true field $Field);
+                }
+            }
         }
 
         impl Buildable for $T {
@@ -614,6 +732,21 @@ macro_rules! braced_repetition_helper {
                     static ref GRAMMAR: Grammar = Grammar::new::<$T>();
                 }
                 &GRAMMAR
+            }
+
+            pub fn visualize(
+                &self,
+                syntax_tree: &SyntaxTree,
+                code: &str,
+                indent: usize,
+                with_indent: bool,
+            ) {
+                if with_indent { print_indent(indent); }
+                print!("{}", <Self as Buildable>::name());
+                println!("[{}]", self.$field.len());
+                for field in &self.$field {
+                    visualize!(syntax_tree code (indent + 1) true field $Field);
+                }
             }
         }
 
