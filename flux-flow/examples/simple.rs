@@ -66,6 +66,6 @@ fn main() {
         }
         writeln!(out).unwrap();
 
-        writeln!(out, "{:#?}", result.syntax_tree).unwrap();
+        result.syntax_tree.visualize(&code);
     }
 }
