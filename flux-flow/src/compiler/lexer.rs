@@ -58,7 +58,7 @@ impl TokenStream {
             Some(Ok(Token {
                 token_kind: TokenKind::Whitespace,
                 len: NonZeroUsize::new(
-                    rest.find(|char: char| !char.is_ascii_whitespace())
+                    rest.find(|c: char| !c.is_ascii_whitespace())
                         .unwrap_or(rest.len()),
                 )
                 .expect("token should not be empty"),
@@ -93,19 +93,61 @@ impl TokenStream {
                     break Err(LexError::UnterminatedComment);
                 }
             })
-        } else if rest.starts_with(is_digit) {
-            // TODO: handle floats
-            // TODO: handle hex/oct/bin
-            let len = NonZeroUsize::new(rest.find(|char| !is_digit(char)).unwrap_or(rest.len()))
-                .expect("token should not be empty");
-            Some(Ok(Token {
-                token_kind: TokenKind::Integer,
-                len,
-            }))
-        } else if rest.starts_with(is_ident_start_char) {
-            let len =
-                NonZeroUsize::new(rest.find(|char| !is_ident_char(char)).unwrap_or(rest.len()))
-                    .expect("token should not be empty");
+        } else if let Some(base) = rest.strip_prefix(|c: char| c.is_ascii_digit()) {
+            if let Some(based_integer) = base.strip_prefix(['B', 'b', 'O', 'o', 'X', 'x']) {
+                let end = based_integer
+                    .trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_');
+                Some(Ok(Token {
+                    token_kind: TokenKind::Integer,
+                    len: NonZeroUsize::new(rest.len() - end.len())
+                        .expect("token should not be empty"),
+                }))
+            } else {
+                let mut token_kind = TokenKind::Integer;
+                let mut after_digits =
+                    base.trim_start_matches(|c: char| c.is_ascii_digit() || c == '_');
+
+                if let Some(after_period) = after_digits.strip_prefix('.') {
+                    token_kind = TokenKind::Float;
+                    after_digits =
+                        after_period.trim_start_matches(|c: char| c.is_ascii_digit() || c == '_');
+                }
+
+                if let Some(after_exponent) = after_digits.strip_prefix(['E', 'e']) {
+                    token_kind = TokenKind::Float;
+                    after_digits = after_exponent
+                        .strip_prefix(['+', '-'])
+                        .unwrap_or(after_exponent)
+                        .trim_start_matches(|c: char| c.is_ascii_digit() || c == '_');
+                }
+
+                let end = after_digits
+                    .trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_');
+
+                Some(Ok(Token {
+                    token_kind,
+                    len: NonZeroUsize::new(rest.len() - end.len())
+                        .expect("token should not be empty"),
+                }))
+            }
+        } else if rest.starts_with('\'') {
+            todo!("char/label")
+        } else if rest.starts_with("b'") {
+            todo!("byte char")
+        } else if rest.starts_with('"') {
+            todo!("string")
+        } else if rest.starts_with("b\"") {
+            todo!("byte string")
+        } else if rest.starts_with("r#") || rest.starts_with("r\"") {
+            todo!("raw string")
+        } else if rest.starts_with("br#") || rest.starts_with("br\"") {
+            todo!("raw byte string")
+        } else if rest.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+            let len = NonZeroUsize::new(
+                rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                    .unwrap_or(rest.len()),
+            )
+            .expect("token should not be empty");
             if let Some(keyword) = self.keyword_token(&rest[0..len.get()]) {
                 Some(Ok(keyword))
             } else {
@@ -255,18 +297,6 @@ impl TokenStream {
         }
         Err(LexError::InvalidToken(char))
     }
-}
-
-fn is_digit(char: char) -> bool {
-    char.is_ascii_digit()
-}
-
-fn is_ident_start_char(char: char) -> bool {
-    char.is_ascii_alphabetic() || char == '_'
-}
-
-fn is_ident_char(char: char) -> bool {
-    char.is_ascii_alphanumeric() || char == '_'
 }
 
 fn find_line_break(current: &str) -> usize {
