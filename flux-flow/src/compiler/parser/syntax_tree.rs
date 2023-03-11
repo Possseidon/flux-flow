@@ -34,10 +34,10 @@ struct SyntaxTreeNodes {
     else_blocks: Vec<ElseBlock>,
     else_if_blocks: Vec<ElseIfBlock>,
     else_if_chains: Vec<ElseIfChain>,
+    expression_groups: Vec<ExpressionGroup>,
     expressions: Vec<Expression>,
     for_blocks: Vec<ForBlock>,
     functions: Vec<Function>,
-    group_expressions: Vec<GroupExpression>,
     if_blocks: Vec<IfBlock>,
     index_expressions: Vec<IndexExpression>,
     index_operations: Vec<IndexOperation>,
@@ -45,7 +45,7 @@ struct SyntaxTreeNodes {
     items: Vec<Item>,
     key_values: Vec<KeyValue>,
     labeled_blocks: Vec<LabeledBlock>,
-    let_bindings: Vec<LetBinding>,
+    let_statements: Vec<LetStatement>,
     loop_blocks: Vec<LoopBlock>,
     map_entry_chains: Vec<MapEntryChain>,
     map_literals: Vec<MapLiteral>,
@@ -68,19 +68,28 @@ struct SyntaxTreeNodes {
     statements: Vec<Statement>,
     struct_field_chains: Vec<StructFieldChain>,
     struct_field_names: Vec<StructFieldName>,
+    struct_field_type_chains: Vec<StructFieldTypeChain>,
+    struct_field_types: Vec<StructFieldType>,
     struct_fields: Vec<StructField>,
     struct_literals: Vec<StructLiteral>,
+    struct_types: Vec<StructType>,
     suffix_expressions: Vec<SuffixExpression>,
     suffix_operation_chains: Vec<SuffixOperationChain>,
     suffix_operations: Vec<SuffixOperation>,
     trailing_comma_expressions: Vec<TrailingCommaExpression>,
     tuple_field_chains: Vec<TupleFieldChain>,
+    tuple_field_type_chains: Vec<TupleFieldTypeChain>,
+    tuple_field_types: Vec<TupleFieldType>,
     tuple_fields: Vec<TupleField>,
     tuple_indices: Vec<TupleIndex>,
     tuple_literals: Vec<TupleLiteral>,
+    tuple_types: Vec<TupleType>,
+    type_annotations: Vec<TypeAnnotation>,
     type_expressions: Vec<TypeExpression>,
+    type_groups: Vec<TypeGroup>,
     types: Vec<Type>,
     unary_operators: Vec<UnaryOperator>,
+    unit_shorthands: Vec<UnitShorthand>,
     while_blocks: Vec<WhileBlock>,
 }
 
@@ -802,6 +811,9 @@ alternation! { argument_expressions: ArgumentExpression ArgumentExpressionImpl A
     True: True,
     Integer: Integer,
     Float: Float,
+    String: String,
+    Char: Char,
+    Unit: (unit_shorthands: UnitShorthand),
     Path: (paths: Path),
     Tuple: (tuple_literals: TupleLiteral),
     Struct: (struct_literals: StructLiteral),
@@ -811,14 +823,15 @@ alternation! { argument_expressions: ArgumentExpression ArgumentExpressionImpl A
     Return: (return_expressions: ReturnExpression),
     Break: (break_expressions: BreakExpression),
     Continue: (continue_expressions: ContinueExpression),
-    Group: (group_expressions: GroupExpression),
+    Group: (expression_groups: ExpressionGroup),
     If: (if_blocks: IfBlock),
     While: (while_blocks: WhileBlock),
     For: (for_blocks: ForBlock),
     Loop: (loop_blocks: LoopBlock),
     Match: (match_blocks: MatchBlock),
+    TypeWithPrefix: (type_expressions: TypeExpression),
     // Type last, as it has overlap with literals which must be resolved using the `type` prefix.
-    Type: (type_expressions: TypeExpression),
+    Type: (types: Type),
 } }
 
 braced_repetition!(array_literals: ArrayLiteral => [ items: (trailing_comma_expressions: TrailingCommaExpression) ]);
@@ -886,7 +899,8 @@ alternation! { collection_modifier_kinds: CollectionModifierKind CollectionModif
 } }
 
 alternation! { conditions: Condition ConditionImpl ConditionRef {
-    LetBinding: (let_bindings: LetBinding),
+    // TODO: Different from LetStatement
+    // Let: (let_statements: LetStatement),
     Expression: (expressions: Expression),
 } }
 
@@ -915,6 +929,12 @@ concatenation! { expressions: Expression {
     suffix: (suffix_operation_chains: SuffixOperationChain),
 } }
 
+concatenation! { expression_groups: ExpressionGroup {
+    > opening_paren: LParen,
+    expression: (expressions: Expression),
+    closing_paren: RParen,
+} }
+
 concatenation! { for_blocks: ForBlock {
     label: [Label],
     > for_kw: For,
@@ -933,12 +953,6 @@ concatenation! { functions: Function {
     block: (blocks: Block),
 } }
 
-concatenation! { group_expressions: GroupExpression {
-    > opening_paren: LParen,
-    expression: (expressions: Expression),
-    closing_paren: RParen,
-} }
-
 concatenation! { if_blocks: IfBlock {
     > if_kw: If,
     condition: (conditions: Condition),
@@ -948,6 +962,7 @@ concatenation! { if_blocks: IfBlock {
 } }
 
 alternation! { index_expressions: IndexExpression IndexExpressionImpl IndexExpressionRef {
+    Index: Integer,
     Name: Ident,
     TupleUpdate: (tuple_literals: TupleLiteral),
     StructUpdate: (struct_literals: StructLiteral),
@@ -981,9 +996,10 @@ concatenation! { labeled_blocks: LabeledBlock {
     > block: (blocks: Block),
 } }
 
-concatenation! { let_bindings: LetBinding {
+concatenation! { let_statements: LetStatement {
     > let_kw: Let,
-    pattern: (patterns: Pattern),
+    name: Ident,
+    type_annotation: [type_annotations: TypeAnnotation],
     eq: Eq,
     expression: (expressions: Expression),
 } }
@@ -1034,6 +1050,7 @@ repetition!(path_resolution_chains: PathResolutionChain => chain: (path_resoluti
 alternation! { patterns: Pattern PatternImpl PatternRef {
     Discard: Underscore,
     Ident: Ident,
+    Unit: (unit_shorthands: UnitShorthand),
 } }
 
 alternation! { prefix_operations: PrefixOperation PrefixOperationImpl PrefixOperationRef {
@@ -1061,8 +1078,10 @@ alternation! { root_types: RootType RootTypeImpl RootTypeRef {
     Deduce: Underscore,
     Never: Not,
     Path: (paths: Path),
-    // Tuple: (tuple_types: TupleType),
-    // Struct: (struct_types: StructType),
+    Tuple: (tuple_types: TupleType),
+    Struct: (struct_types: StructType),
+    Unit: (unit_shorthands: UnitShorthand),
+    Group: (type_groups: TypeGroup),
 } }
 
 braced_repetition!(set_item_chains: SetItemChain => { items: (trailing_comma_expressions: TrailingCommaExpression) });
@@ -1074,7 +1093,7 @@ concatenation! { set_literals: SetLiteral {
 
 alternation! { statements: Statement StatementImpl StatementRef {
     Semi: Semi,
-    LetBinding: (let_bindings: LetBinding),
+    Let: (let_statements: LetStatement),
     Expression: (expressions: Expression),
 } }
 
@@ -1091,9 +1110,22 @@ concatenation! { struct_field_names: StructFieldName {
     > colon: Colon,
 } }
 
+concatenation! { struct_field_types: StructFieldType {
+    name: (struct_field_names: StructFieldName),
+    > ty: (types: Type),
+    comma: [Comma],
+} }
+
+braced_repetition!(struct_field_type_chains: StructFieldTypeChain => ( fields: (struct_field_types: StructFieldType) ));
+
 concatenation! { struct_literals: StructLiteral {
     at: At,
     > content: (struct_field_chains: StructFieldChain),
+} }
+
+concatenation! { struct_types: StructType {
+    at: At,
+    > types: (struct_field_type_chains: StructFieldTypeChain),
 } }
 
 concatenation! { suffix_expressions: SuffixExpression {
@@ -1122,6 +1154,14 @@ concatenation! { tuple_fields: TupleField {
 
 braced_repetition!(tuple_field_chains: TupleFieldChain => ( fields: (tuple_fields: TupleField) ));
 
+concatenation! { tuple_field_types: TupleFieldType {
+    index: [tuple_indices: TupleIndex],
+    > ty: (types: Type),
+    comma: [Comma],
+} }
+
+braced_repetition!(tuple_field_type_chains: TupleFieldTypeChain => ( fields: (tuple_field_types: TupleFieldType) ));
+
 concatenation! { tuple_indices: TupleIndex {
     index: Integer,
     > colon: Colon,
@@ -1132,19 +1172,44 @@ concatenation! { tuple_literals: TupleLiteral {
     > content: (tuple_field_chains: TupleFieldChain),
 } }
 
+concatenation! { tuple_types: TupleType {
+    pound: Pound,
+    > types: (tuple_field_type_chains: TupleFieldTypeChain),
+} }
+
 concatenation! { types: Type {
     collection_modifiers: (collection_modifier_chains: CollectionModifierChain),
     > root: (root_types: RootType),
+    // TODO: generics
+} }
+
+concatenation! { type_annotations: TypeAnnotation {
+    > colon: Colon,
+    ty: (types: Type),
 } }
 
 concatenation! { type_expressions: TypeExpression {
+    // TODO: Type is both essential but also optional
+    //       "Optional" is currently implemented with separate expression alternatives
+    //       -> Make last_essential optional as well to simplify this use-case?
     > type_kw: Type,
-    path: (paths: Path),
+    ty: (types: Type),
+} }
+
+concatenation! { type_groups: TypeGroup {
+    > opening_paren: LParen,
+    ty: (types: Type),
+    closing_paren: RParen,
 } }
 
 token_alternation! { unary_operators: UnaryOperator {
     Neg: Minus,
     Not: Not,
+} }
+
+concatenation! { unit_shorthands: UnitShorthand {
+    opening_paren: LParen,
+    > closing_paren: RParen,
 } }
 
 concatenation! { while_blocks: WhileBlock {
