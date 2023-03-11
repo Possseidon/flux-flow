@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -8,7 +10,7 @@ pub struct TokenStream {
 #[derive(Clone, Copy, Debug)]
 pub struct Token {
     pub token_kind: TokenKind,
-    pub len: usize,
+    pub len: NonZeroUsize,
 }
 
 #[derive(Debug, Error)]
@@ -55,19 +57,21 @@ impl TokenStream {
         {
             Some(Ok(Token {
                 token_kind: TokenKind::Whitespace,
-                len: rest
-                    .find(|char: char| !char.is_ascii_whitespace())
-                    .unwrap_or(rest.len()),
+                len: NonZeroUsize::new(
+                    rest.find(|char: char| !char.is_ascii_whitespace())
+                        .unwrap_or(rest.len()),
+                )
+                .expect("token should not be empty"),
             }))
         } else if rest.starts_with("///") {
             Some(Ok(Token {
                 token_kind: TokenKind::DocComment,
-                len: find_line_break(rest),
+                len: NonZeroUsize::new(find_line_break(rest)).expect("token should not be empty"),
             }))
         } else if rest.starts_with("//") {
             Some(Ok(Token {
                 token_kind: TokenKind::LineComment,
-                len: find_line_break(rest),
+                len: NonZeroUsize::new(find_line_break(rest)).expect("token should not be empty"),
             }))
         } else if let Some(mut line_comment) = rest.strip_prefix("/*") {
             let mut nesting: usize = 1;
@@ -81,7 +85,7 @@ impl TokenStream {
                         if nesting == 0 {
                             break Ok(Token {
                                 token_kind: TokenKind::BlockComment,
-                                len: end + 2,
+                                len: NonZeroUsize::new(end + 2).expect("token should not be empty"),
                             });
                         }
                     }
@@ -92,14 +96,17 @@ impl TokenStream {
         } else if rest.starts_with(is_digit) {
             // TODO: handle floats
             // TODO: handle hex/oct/bin
-            let len = rest.find(|char| !is_digit(char)).unwrap_or(rest.len());
+            let len = NonZeroUsize::new(rest.find(|char| !is_digit(char)).unwrap_or(rest.len()))
+                .expect("token should not be empty");
             Some(Ok(Token {
                 token_kind: TokenKind::Integer,
                 len,
             }))
         } else if rest.starts_with(is_ident_start_char) {
-            let len = rest.find(|char| !is_ident_char(char)).unwrap_or(rest.len());
-            if let Some(keyword) = self.keyword_token(&rest[0..len]) {
+            let len =
+                NonZeroUsize::new(rest.find(|char| !is_ident_char(char)).unwrap_or(rest.len()))
+                    .expect("token should not be empty");
+            if let Some(keyword) = self.keyword_token(&rest[0..len.get()]) {
                 Some(Ok(keyword))
             } else {
                 Some(Ok(Token {
@@ -128,26 +135,26 @@ impl TokenStream {
     }
 
     /// Advances over the given token, returning the number of advanced bytes.
-    pub fn advance_token(&mut self, token: Token) -> usize {
-        self.index += token.len;
+    pub fn advance_token(&mut self, token: Token) -> NonZeroUsize {
+        self.index += token.len.get();
         token.len
     }
 
     /// Advances over the given error, returning the number of advanced bytes.
-    pub fn advance_error(&mut self, code: &str, error: &LexError) -> usize {
+    pub fn advance_error(&mut self, code: &str, error: &LexError) -> NonZeroUsize {
         let old_index = self.index;
         match error {
             LexError::InvalidToken(char) => self.index += char.len_utf8(),
             LexError::UnterminatedComment | LexError::UnterminatedString => self.index = code.len(),
         };
-        self.index - old_index
+        NonZeroUsize::new(self.index - old_index).expect("error should have advanced")
     }
 
     fn keyword_token(self, ident: &str) -> Option<Token> {
         macro_rules! tokens {
             ( $( $string:literal => $TK:ident, )* ) => {
                 $( if ident == $string {
-                    const LEN: usize = $string.len();
+                    const LEN: NonZeroUsize = new_non_zero_usize($string.len());
                     Some(Token { token_kind: TokenKind::$TK, len: LEN })
                 } else )+ {
                     None
@@ -192,7 +199,7 @@ impl TokenStream {
         macro_rules! check_punctutation_tokens {
             ( $( $string:literal => $TK:ident, )* ) => {
                 $( if current.starts_with($string) {
-                    const LEN: usize = $string.len();
+                    const LEN: NonZeroUsize = new_non_zero_usize($string.len());
                     Some(Token { token_kind: TokenKind::$TK, len: LEN })
                 } else )+ {
                     None
@@ -238,7 +245,10 @@ impl TokenStream {
                     .copied()
                     .unwrap_or(None)
                 {
-                    return Ok(Token { token_kind, len: 1 });
+                    return Ok(Token {
+                        token_kind,
+                        len: new_non_zero_usize(1),
+                    });
                 }
             }
         }
@@ -272,6 +282,14 @@ fn is_whitespace_token(token_kind: TokenKind) -> bool {
         token_kind,
         TokenKind::Whitespace | TokenKind::LineComment | TokenKind::BlockComment
     )
+}
+
+const fn new_non_zero_usize(value: usize) -> NonZeroUsize {
+    if let Some(value) = NonZeroUsize::new(value) {
+        value
+    } else {
+        panic!("value should be non-zero")
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -335,7 +353,7 @@ impl BraceKind {
 pub type BraceIndex = u8;
 
 pub mod braces {
-
+    // TODO: constants were only necessary for const generics, which are no longer in use
     pub const BRACE_PAREN: u8 = 0;
     pub const BRACE_BRACK: u8 = 1;
     pub const BRACE_CURLY: u8 = 2;
@@ -373,9 +391,8 @@ macro_rules! tokens {
     };
 }
 
-// TODO: constants were only necessary for const generics, which are no longer in use
-
 tokens! {
+    // TODO: constants were only necessary for const generics, which are no longer in use
     Whitespace(TK_WHITESPACE) = "whitespace",
     LineComment(TK_LINE_COMMENT) = "line comment",
     BlockComment(TK_BLOCK_COMMENT) = "block comment",
@@ -585,7 +602,7 @@ mod tests {
 
         let advanced = token_stream.advance_token(token);
         assert_eq!(advanced, token.len);
-        assert_eq!(token_stream.index, index_before + advanced);
+        assert_eq!(token_stream.index, index_before + advanced.get());
 
         token
     }
@@ -612,10 +629,11 @@ mod tests {
 
         let token = assert_token_and_advance(code, &mut token_stream);
 
+        const LEN: NonZeroUsize = new_non_zero_usize(4);
         assert!(matches!(
             token,
             Token {
-                len: 4,
+                len: LEN,
                 token_kind: TokenKind::Ident
             },
         ));

@@ -1,6 +1,6 @@
 use super::{
     grammar::{GrammarBuilder, RecursiveRule},
-    syntax_tree::{NodeRef, SyntaxTree, Token},
+    syntax_tree::{EmptyToken, NodeRef, OptionalToken, SyntaxTree, Token},
 };
 
 #[derive(Debug)]
@@ -33,6 +33,7 @@ impl std::fmt::Debug for NodeBuilder {
 pub enum NodeBuilderElement {
     NodeRef(NodeRef),
     Token(Token),
+    EmptyToken(EmptyToken),
     Empty,
     Error,
 }
@@ -41,6 +42,7 @@ pub enum NodeBuilderElement {
 enum CompactNodeBuilderElement {
     NodeRef(NodeRef),
     Token(Token),
+    EmptyToken(EmptyToken),
     Empty(usize),
     Error(usize),
     Separator(usize),
@@ -110,6 +112,10 @@ impl NodeBuilderInput {
             NodeBuilderElement::Token(token) => {
                 self.stack.push(CompactNodeBuilderElement::Token(token))
             }
+            NodeBuilderElement::EmptyToken(empty_token) => {
+                self.stack
+                    .push(CompactNodeBuilderElement::EmptyToken(empty_token));
+            }
             NodeBuilderElement::Empty => {
                 if let Some(CompactNodeBuilderElement::Empty(last)) = self.stack.last_mut() {
                     *last += 1;
@@ -144,7 +150,10 @@ impl NodeBuilderInput {
                     print!(" {:?}", node_ref);
                 }
                 CompactNodeBuilderElement::Token(token) => {
-                    print!(" {}", &code[token.index..(token.index + token.len)]);
+                    print!(" `{}`", &code[token.token()]);
+                }
+                CompactNodeBuilderElement::EmptyToken(..) => {
+                    print!(" none");
                 }
                 CompactNodeBuilderElement::Empty(count) => {
                     for _ in 0..*count {
@@ -202,6 +211,10 @@ impl<'a> NodeBuilderReader<'a> {
                 self.node_builder_index += 1;
                 NodeBuilderElement::Token(*token)
             }
+            CompactNodeBuilderElement::EmptyToken(empty_token) => {
+                self.node_builder_index += 1;
+                NodeBuilderElement::EmptyToken(*empty_token)
+            }
             CompactNodeBuilderElement::Empty(count) => {
                 *count -= 1;
                 if *count == 0 {
@@ -237,7 +250,8 @@ impl NodeBuilderReadable for Option<NodeRef> {
     fn read(context: &mut NodeBuilderReader) -> Result<Self, NodeBuilderError> {
         match context.read_node() {
             NodeBuilderElement::NodeRef(node_ref) => Ok(Some(node_ref)),
-            NodeBuilderElement::Token(_) => panic!("token should be a node ref"),
+            NodeBuilderElement::Token(..) => panic!("token should be a node ref"),
+            NodeBuilderElement::EmptyToken(..) => panic!("empty token should be a node ref"),
             NodeBuilderElement::Empty => Ok(None),
             NodeBuilderElement::Error => Err(NodeBuilderError),
         }
@@ -253,9 +267,22 @@ impl NodeBuilderReadable for Token {
 impl NodeBuilderReadable for Option<Token> {
     fn read(context: &mut NodeBuilderReader) -> Result<Self, NodeBuilderError> {
         match context.read_node() {
-            NodeBuilderElement::NodeRef(_) => panic!("node ref should be a token"),
+            NodeBuilderElement::NodeRef(..) => panic!("node ref should be a token"),
             NodeBuilderElement::Token(token) => Ok(Some(token)),
+            NodeBuilderElement::EmptyToken(..) => panic!("empty token should be a token"),
             NodeBuilderElement::Empty => Ok(None),
+            NodeBuilderElement::Error => Err(NodeBuilderError),
+        }
+    }
+}
+
+impl NodeBuilderReadable for OptionalToken {
+    fn read(context: &mut NodeBuilderReader) -> Result<Self, NodeBuilderError> {
+        match context.read_node() {
+            NodeBuilderElement::NodeRef(..) => panic!("node ref should be an optional token"),
+            NodeBuilderElement::Token(token) => Ok(OptionalToken::Some(token)),
+            NodeBuilderElement::EmptyToken(token) => Ok(OptionalToken::None(token)),
+            NodeBuilderElement::Empty => panic!("empty should be an optional token"),
             NodeBuilderElement::Error => Err(NodeBuilderError),
         }
     }
