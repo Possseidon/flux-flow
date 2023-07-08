@@ -6,8 +6,17 @@ use super::{
 #[derive(Debug)]
 pub struct NodeBuilderError;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UntypedNodeRef(pub usize);
+
+impl UntypedNodeRef {
+    fn is_root(self) -> bool {
+        self.0 == 0
+    }
+}
+
 pub type NodeBuilderFunction =
-    fn(&mut SyntaxTree, &mut NodeBuilderReader) -> Result<Option<NodeRef>, NodeBuilderError>;
+    fn(&mut SyntaxTree, &mut NodeBuilderReader) -> Result<Option<UntypedNodeRef>, NodeBuilderError>;
 
 pub trait Buildable {
     fn name() -> &'static str;
@@ -17,7 +26,7 @@ pub trait Buildable {
     fn build(
         syntax_tree: &mut SyntaxTree,
         reader: &mut NodeBuilderReader,
-    ) -> Result<Option<NodeRef>, NodeBuilderError>;
+    ) -> Result<Option<UntypedNodeRef>, NodeBuilderError>;
 }
 
 #[derive(Clone, Copy)]
@@ -31,7 +40,7 @@ impl std::fmt::Debug for NodeBuilder {
 
 #[derive(Clone, Copy, Debug)]
 pub enum NodeBuilderElement {
-    NodeRef(NodeRef),
+    NodeRef(UntypedNodeRef),
     Token(Token),
     EmptyToken(EmptyToken),
     Empty,
@@ -40,7 +49,7 @@ pub enum NodeBuilderElement {
 
 #[derive(Clone, Copy, Debug)]
 enum CompactNodeBuilderElement {
-    NodeRef(NodeRef),
+    NodeRef(UntypedNodeRef),
     Token(Token),
     EmptyToken(EmptyToken),
     Empty(usize),
@@ -138,6 +147,8 @@ impl NodeBuilderInput {
             .stack
             .pop()
             .expect("node builder input should not be empty");
+        // TODO: is_root checks for index 0 put root module is last?
+        //       I think it currently works because there is only one module
         assert!(element.is_root());
         assert!(self.stack.is_empty());
     }
@@ -240,16 +251,16 @@ pub trait NodeBuilderReadable: Sized {
     fn read(context: &mut NodeBuilderReader) -> Result<Self, NodeBuilderError>;
 }
 
-impl NodeBuilderReadable for NodeRef {
+impl<T> NodeBuilderReadable for NodeRef<T> {
     fn read(context: &mut NodeBuilderReader) -> Result<Self, NodeBuilderError> {
         Option::<Self>::read(context)?.ok_or(NodeBuilderError)
     }
 }
 
-impl NodeBuilderReadable for Option<NodeRef> {
+impl<T> NodeBuilderReadable for Option<NodeRef<T>> {
     fn read(context: &mut NodeBuilderReader) -> Result<Self, NodeBuilderError> {
         match context.read_node() {
-            NodeBuilderElement::NodeRef(node_ref) => Ok(Some(node_ref)),
+            NodeBuilderElement::NodeRef(node_ref) => Ok(Some(NodeRef::new(node_ref.0))),
             NodeBuilderElement::Token(..) => panic!("token should be a node ref"),
             NodeBuilderElement::EmptyToken(..) => panic!("empty token should be a node ref"),
             NodeBuilderElement::Empty => Ok(None),
