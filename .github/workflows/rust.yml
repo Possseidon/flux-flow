@@ -15,12 +15,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - name: fmt
-        run: cargo fmt --all --check
-        continue-on-error: true
       - name: clippy
         run: cargo clippy --all-targets --verbose -- -D warnings
       - name: build
         run: cargo build --all-targets --verbose
       - name: test
         run: cargo test --all-targets --verbose
+
+  fmt:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: fmt
+        run: cargo fmt --all --check
