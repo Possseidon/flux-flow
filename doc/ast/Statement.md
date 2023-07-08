@@ -1,5 +1,0 @@
-# Statement
-
-## Syntax
-
-## Examples

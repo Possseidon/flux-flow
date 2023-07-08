@@ -1,257 +1,253 @@
-pub mod collections;
 pub mod function;
-pub mod primitives;
-pub mod range;
-pub mod string;
-pub mod tuple;
-pub mod typed_function;
 
-use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
-    sync::Arc,
-};
+use std::{mem::size_of, sync::Arc};
 
+use bitvec::vec::BitVec;
 use ordered_float::OrderedFloat;
-
-use crate::{
-    runtime_type::{NamedStruct, RuntimeType, TypedStruct},
-    static_type::StaticType,
-};
-
-use self::{
-    function::Function,
-    primitives::NativeFunction,
-    range::{End, Start, StartEnd},
-};
 
 // TODO: Use smartstring again to save on allocations
 
-// TODO: Deeply nested Value can cause a stack overflow on drop.
-
 /// Stores a value of any type.
-///
-/// Conversion between Rust types and [`Value`] can be performed using [`From`] and [`TryFrom`].
 ///
 /// Size is kept at 16 bytes, so moves are very cheap.
 ///
 /// Additionally, clones are cheap as well, as large values are reference counted and will only be
 /// cloned when mutability is desired.
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Value(ValueStorage);
-
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-enum ValueStorage {
-    #[default]
-    Unit,
-
-    /// Stored in place to avoid additional heap allocation.
-    Tuple1(Arc<[Value; 1]>),
-    /// Stored in place to avoid additional heap allocation.
-    Tuple2(Arc<[Value; 2]>),
-    /// Stored in place to avoid additional heap allocation.
-    Tuple3(Arc<[Value; 3]>),
-    /// Stores an arbitrarily large number of tuple values.
-    Tuple4OrMore(Arc<Box<[Value]>>),
-
-    TypedTuple1(Arc<([StaticType; 1], [Value; 1])>),
-    TypedTuple2(Arc<([StaticType; 2], [Value; 2])>),
-    TypedTuple3(Arc<([StaticType; 3], [Value; 3])>),
-    TypedTuple4OrMore(Arc<(Box<[StaticType; 2]>, Box<[Value; 2]>)>),
-
-    Boolean(bool),
-
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Value {
+    Bool(bool),
     U8(u8),
     U16(u16),
     U32(u32),
     U64(u64),
     U128(Arc<u128>),
-    Usize(usize),
     I8(i8),
     I16(i16),
     I32(i32),
     I64(i64),
     I128(Arc<i128>),
-    Isize(isize),
-
     F32(OrderedFloat<f32>),
     F64(OrderedFloat<f64>),
-
     Char(char),
-    String(Arc<String>),
-    StringSlice(Arc<(Arc<String>, (Option<usize>, Option<usize>))>),
-
-    RangeFull,
-    Range(Arc<StartEnd>),
-    RangeFrom(Arc<Start>),
-    RangeTo(Arc<End>),
-    RangeInclusive(Arc<StartEnd>),
-    RangeToInclusive(Arc<End>),
-
-    TypedRange(Arc<(StaticType, StartEnd)>),
-    TypedRangeFrom(Arc<(StaticType, Start)>),
-    TypedRangeTo(Arc<(StaticType, End)>),
-    TypedRangeInclusive(Arc<(StaticType, StartEnd)>),
-    TypedRangeToInclusive(Arc<(StaticType, End)>),
-
-    UnitStruct,
-    Struct1(Arc<Value>),
-    Struct2(Arc<[Value; 2]>),
-    Struct3(Arc<[Value; 3]>),
-    Struct4OrMore(Arc<Box<[Value]>>),
-
-    NamedStruct1(Arc<(NamedStruct, Value)>),
-    NamedStruct2(Arc<(NamedStruct, [Value; 2])>),
-    NamedStruct3(Arc<(NamedStruct, [Value; 3])>),
-    NamedStruct4OrMore(Arc<(NamedStruct, Box<[Value]>)>),
-
-    TypedStruct1(Arc<(TypedStruct, Value)>),
-    TypedStruct2(Arc<(TypedStruct, [Value; 2])>),
-    TypedStruct3(Arc<(TypedStruct, [Value; 3])>),
-    TypedStruct4OrMore(Arc<(TypedStruct, Box<[Value]>)>),
-
-    // TODO: Optimized Array Types
-    EmptyArray,
-    Array(Arc<Box<[Value]>>),
-    TypedArray(Arc<(StaticType, Box<[Value]>)>),
-
-    // TODO: Optimized Vec Types
-    Vec(Arc<Vec<Value>>),
-    TypedVec(Arc<(StaticType, Vec<Value>)>),
-
-    // TODO: Optimized Deque Types
-    Deque(Arc<VecDeque<Value>>),
-    TypedDeque(Arc<(StaticType, VecDeque<Value>)>),
-
-    // TODO: Optimized Set Types
-    Set(Arc<BTreeSet<Value>>),
-    TypedSet(Arc<(StaticType, BTreeSet<Value>)>),
-
-    // TODO: Optimized Map Types
-    Map(Arc<BTreeMap<Value, Value>>),
-    TypedMap(Arc<(StaticType, StaticType, BTreeMap<Value, Value>)>),
-
-    Function(Arc<Function>),
-    // TypedFunction(Arc<TypedFunction>),
-    NativeFunction(NativeFunction),
-    // TypedNativeFunction(Arc<TypedNativeFunction>),
-
-    // TODO:
-    // UnitNewType(Arc<NewTypeId>),
-    // UnitStructNewType(Arc<NewTypeId>),
-    // NewType(Arc<(NewType, Value)>),
-
-    // StructLayout(Arc<NamedStruct>),
-    // NewTypeType(Arc<NewType>),
-    RuntimeType(Arc<RuntimeType>),
-    StaticType(Arc<StaticType>),
-    // ---
+    // Str(Arc<String>),
+    // StrSlice(Arc<StrSlice>),
+    // Box(Arc<Vec<Value>>),
+    // Vec(Arc<Vec<Value>>),
+    // Deque(Arc<VecDeque<Value>>),
+    // Set(Arc<BTreeSet<Value>>),
+    // Map(Arc<BTreeMap<Value, Value>>),
+    // Function(Arc<Function>),
+    // NativeFunction(NativeFunction),
     // Generator(Arc<Generator>),
-
-    // BigInt(Arc<BigInt>),
-
-    // Rational32(Rational32),
-    // Rational64(Rational64),
-    // BigRational(Arc<BigRational>),
+    // RawType(Arc<MonoType>),
+    // RuntimeType(Arc<RuntimeType>),
+    // StaticType(Arc<StaticType>),
 }
 
-impl Value {
-    pub fn get_type(&self) -> RuntimeType {
-        match &self.0 {
-            ValueStorage::Unit => RuntimeType::Unit,
+const _: () = assert!(size_of::<Value>() <= 16, "Value should at most 16 bytes");
 
-            ValueStorage::Tuple1(tuple) => RuntimeType::Tuple(Box::new([tuple[0].get_type()])),
-            ValueStorage::Tuple2(tuple) => {
-                RuntimeType::Tuple(tuple.iter().map(Self::get_type).collect())
-            }
-            ValueStorage::Tuple3(tuple) => {
-                RuntimeType::Tuple(tuple.iter().map(Self::get_type).collect())
-            }
-            ValueStorage::Tuple4OrMore(tuple) => {
-                RuntimeType::Tuple(tuple.iter().map(Self::get_type).collect())
-            }
-
-            ValueStorage::TypedTuple1(tuple) => RuntimeType::TypedTuple(Box::new(tuple.0.clone())),
-            ValueStorage::TypedTuple2(tuple) => RuntimeType::TypedTuple(Box::new(tuple.0.clone())),
-            ValueStorage::TypedTuple3(tuple) => RuntimeType::TypedTuple(Box::new(tuple.0.clone())),
-            ValueStorage::TypedTuple4OrMore(tuple) => RuntimeType::TypedTuple(tuple.0.clone()),
-
-            ValueStorage::Boolean(_) => RuntimeType::Boolean,
-
-            ValueStorage::U8(_) => RuntimeType::U8,
-            ValueStorage::U16(_) => RuntimeType::U16,
-            ValueStorage::U32(_) => RuntimeType::U32,
-            ValueStorage::U64(_) => RuntimeType::U64,
-            ValueStorage::U128(_) => RuntimeType::U128,
-            ValueStorage::Usize(_) => RuntimeType::Usize,
-            ValueStorage::I8(_) => RuntimeType::I8,
-            ValueStorage::I16(_) => RuntimeType::I16,
-            ValueStorage::I32(_) => RuntimeType::I32,
-            ValueStorage::I64(_) => RuntimeType::I64,
-            ValueStorage::I128(_) => RuntimeType::I128,
-            ValueStorage::Isize(_) => RuntimeType::Isize,
-
-            ValueStorage::F32(_) => RuntimeType::F32,
-            ValueStorage::F64(_) => RuntimeType::F64,
-
-            ValueStorage::Char(_) => RuntimeType::Char,
-            ValueStorage::String(_) => RuntimeType::String,
-            ValueStorage::StringSlice(_) => RuntimeType::StringSlice,
-
-            ValueStorage::RangeFull => RuntimeType::RangeFull,
-            ValueStorage::Range(range) => RuntimeType::Range(Box::new(range.get_type())),
-            ValueStorage::RangeFrom(range) => RuntimeType::RangeFrom(Box::new(range.get_type())),
-            ValueStorage::RangeTo(range) => RuntimeType::RangeTo(Box::new(range.get_type())),
-            ValueStorage::RangeInclusive(range) => {
-                RuntimeType::RangeInclusive(Box::new(range.get_type()))
-            }
-            ValueStorage::RangeToInclusive(range) => {
-                RuntimeType::RangeToInclusive(Box::new(range.get_type()))
-            }
-
-            ValueStorage::TypedRange(range) => RuntimeType::TypedRange(range.0.clone()),
-            ValueStorage::TypedRangeFrom(range) => RuntimeType::TypedRange(range.0.clone()),
-            ValueStorage::TypedRangeTo(range) => RuntimeType::TypedRange(range.0.clone()),
-            ValueStorage::TypedRangeInclusive(range) => RuntimeType::TypedRange(range.0.clone()),
-            ValueStorage::TypedRangeToInclusive(range) => RuntimeType::TypedRange(range.0.clone()),
-
-            ValueStorage::UnitStruct => RuntimeType::UnitStruct,
-
-            ValueStorage::Struct1(_) => todo!(),
-            ValueStorage::Struct2(_) => todo!(),
-            ValueStorage::Struct3(_) => todo!(),
-            ValueStorage::Struct4OrMore(_) => todo!(),
-
-            ValueStorage::NamedStruct1(_) => todo!(),
-            ValueStorage::NamedStruct2(_) => todo!(),
-            ValueStorage::NamedStruct3(_) => todo!(),
-            ValueStorage::NamedStruct4OrMore(_) => todo!(),
-
-            ValueStorage::TypedStruct1(_) => todo!(),
-            ValueStorage::TypedStruct2(_) => todo!(),
-            ValueStorage::TypedStruct3(_) => todo!(),
-            ValueStorage::TypedStruct4OrMore(_) => todo!(),
-
-            ValueStorage::EmptyArray => todo!(),
-            ValueStorage::Array(_) => todo!(),
-            ValueStorage::TypedArray(_) => todo!(),
-
-            ValueStorage::Vec(_) => todo!(),
-            ValueStorage::TypedVec(_) => todo!(),
-
-            ValueStorage::Deque(_) => todo!(),
-            ValueStorage::TypedDeque(_) => todo!(),
-
-            ValueStorage::Set(_) => todo!(),
-            ValueStorage::TypedSet(_) => todo!(),
-
-            ValueStorage::Map(_) => todo!(),
-            ValueStorage::TypedMap(_) => todo!(),
-
-            ValueStorage::Function(_) => todo!(),
-            ValueStorage::NativeFunction(_) => todo!(),
-
-            ValueStorage::RuntimeType(_) => todo!(),
-            ValueStorage::StaticType(_) => todo!(),
-        }
-    }
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum ValueKind {
+    Bool,
+    U8,
+    U16,
+    U32,
+    U64,
+    U128,
+    I8,
+    I16,
+    I32,
+    I64,
+    I128,
+    F32,
+    F64,
+    Char,
+    // Str,
+    // StrSlice,
+    // Box,
+    // Vec,
+    // Deque,
+    // Set,
+    // Map,
+    // Function,
+    // NativeFunction,
+    // Generator,
+    // RawType,
+    // RuntimeType,
+    // StaticType,
 }
+
+/// A stack that efficiently packs primitive values, by utilizing separate [`Vec`]s.
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ValueStack {
+    /// Holds primitive values that can be represented by one or more bits ([bool]).
+    bits: BitVec,
+    /// Holds primitive values that have an alignment of 1 ([u8] and [i8]).
+    u8s: Vec<u8>,
+    /// Holds primitive values that have an alignment of 2 ([u16] and [i16]).
+    u16s: Vec<u16>,
+    /// Holds primitive values that have an alignment of 4 ([u32], [i32], [f32] and [char]).
+    u32s: Vec<u32>,
+    /// Holds primitive values that have an alignment of 8 ([u64], [i64], [f64], [u128] and [i128]).
+    u64s: Vec<u64>,
+    /// Used for anything else or if the concrete type of a primitive must be known at runtime.
+    values: Vec<Value>,
+}
+
+// impl Stack {
+//     fn push(&mut self, value: Value) {
+//         match value {
+//             Value::Bool(value) => self.push_bool(value),
+//             Value::U8(value) => self.push_u8(value),
+//             Value::U16(value) => self.push_u16(value),
+//             Value::U32(value) => self.push_u32(value),
+//             Value::U64(value) => self.push_u64(value),
+//             Value::U128(value) => self.push_u128(*value),
+//             Value::I8(value) => self.push_i8(value),
+//             Value::I16(value) => self.push_i16(value),
+//             Value::I32(value) => self.push_i32(value),
+//             Value::I64(value) => self.push_i64(value),
+//             Value::I128(value) => self.push_i128(*value),
+//             Value::F32(value) => self.push_f32(value.0),
+//             Value::F64(value) => self.push_f64(value.0),
+//             Value::Char(value) => self.u32s.push(value as u32),
+//             value => self.values.push(value),
+//         }
+//     }
+
+//     fn push_bool(&mut self, value: bool) {
+//         self.bits.push(value);
+//     }
+
+//     fn push_u8(&mut self, value: u8) {
+//         self.u8s.push(value);
+//     }
+
+//     fn push_u16(&mut self, value: u16) {
+//         self.u16s.push(value);
+//     }
+
+//     fn push_u32(&mut self, value: u32) {
+//         self.u32s.push(value);
+//     }
+
+//     fn push_u64(&mut self, value: u64) {
+//         self.u64s.push(value);
+//     }
+
+//     fn push_u128(&mut self, value: u128) {
+//         self.u128s.push(value);
+//     }
+
+//     fn push_i8(&mut self, value: i8) {
+//         self.u8s.push(value as u8);
+//     }
+
+//     fn push_i16(&mut self, value: i16) {
+//         self.u16s.push(value as u16);
+//     }
+
+//     fn push_i32(&mut self, value: i32) {
+//         self.u32s.push(value as u32);
+//     }
+
+//     fn push_i64(&mut self, value: i64) {
+//         self.u64s.push(value as u64);
+//     }
+
+//     fn push_i128(&mut self, value: i128) {
+//         self.u128s.push(value as u128);
+//     }
+
+//     fn push_f32(&mut self, value: f32) {
+//         self.u32s.push(value.to_bits());
+//     }
+
+//     fn push_f64(&mut self, value: f64) {
+//         self.u64s.push(value.to_bits());
+//     }
+
+//     fn push_value(&mut self, value: Value) {
+//         self.values.push(value);
+//     }
+
+//     fn pop(&mut self, kind: ValueKind) -> Value {
+//         match kind {
+//             ValueKind::Bool => Value::Bool(self.pop_bool()),
+//             ValueKind::U8 => Value::U8(self.pop_u8()),
+//             ValueKind::U16 => Value::U16(self.pop_u16()),
+//             ValueKind::U32 => Value::U32(self.pop_u32()),
+//             ValueKind::U64 => Value::U64(self.pop_u64()),
+//             ValueKind::U128 => Value::U128(Arc::new(self.pop_u128())),
+//             ValueKind::I8 => Value::I8(self.pop_i8()),
+//             ValueKind::I16 => Value::I16(self.pop_i16()),
+//             ValueKind::I32 => Value::I32(self.pop_i32()),
+//             ValueKind::I64 => Value::I64(self.pop_i64()),
+//             ValueKind::I128 => Value::I128(Arc::new(self.pop_i128())),
+//             ValueKind::F32 => Value::F32(OrderedFloat(self.pop_f32())),
+//             ValueKind::F64 => Value::F64(OrderedFloat(self.pop_f64())),
+//             ValueKind::Char => Value::Char(self.pop_char()),
+//         }
+//     }
+
+//     fn pop_bool(&mut self) -> bool {
+//         self.bits.pop().expect("bits should not be empty")
+//     }
+
+//     fn pop_u8(&mut self) -> u8 {
+//         self.u8s.pop().expect("u8s should not be empty")
+//     }
+
+//     fn pop_u16(&mut self) -> u16 {
+//         self.u16s.pop().expect("u16s should not be empty")
+//     }
+
+//     fn pop_u32(&mut self) -> u32 {
+//         self.u32s.pop().expect("u32s should not be empty")
+//     }
+
+//     fn pop_u64(&mut self) -> u64 {
+//         self.u64s.pop().expect("u64s should not be empty")
+//     }
+
+//     fn pop_u128(&mut self) -> u128 {
+//         self.u128s.pop().expect("u128s should not be empty")
+//     }
+
+//     fn pop_i8(&mut self) -> i8 {
+//         self.u8s.pop().expect("u8s should not be empty") as i8
+//     }
+
+//     fn pop_i16(&mut self) -> i16 {
+//         self.u16s.pop().expect("u16s should not be empty") as i16
+//     }
+
+//     fn pop_i32(&mut self) -> i32 {
+//         self.u32s.pop().expect("u32s should not be empty") as i32
+//     }
+
+//     fn pop_i64(&mut self) -> i64 {
+//         self.u64s.pop().expect("u64s should not be empty") as i64
+//     }
+
+//     fn pop_i128(&mut self) -> i128 {
+//         self.u128s.pop().expect("u128s should not be empty") as i128
+//     }
+
+//     fn pop_f32(&mut self) -> f32 {
+//         f32::from_bits(self.u32s.pop().expect("u32s should not be empty"))
+//     }
+
+//     fn pop_f64(&mut self) -> f64 {
+//         f64::from_bits(self.u64s.pop().expect("u64s should not be empty"))
+//     }
+
+//     fn pop_char(&mut self) -> char {
+//         char::from_u32(self.u32s.pop().expect("chars should not be empty"))
+//             .expect("char should be valid")
+//     }
+
+//     fn pop_value(&mut self) -> Value {
+//         self.values.pop().expect("values should not be empty")
+//     }
+// }

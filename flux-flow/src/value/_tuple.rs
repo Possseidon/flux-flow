@@ -1,10 +1,10 @@
 use std::{mem::take, sync::Arc};
 
-use super::{Value, ValueStorage};
+use super::{Value, ValueImpl};
 
 impl From<()> for Value {
     fn from(_: ()) -> Self {
-        Self(ValueStorage::Unit)
+        Self(ValueImpl::Unit)
     }
 }
 
@@ -13,7 +13,7 @@ impl TryFrom<Value> for () {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value.0 {
-            ValueStorage::Unit => Ok(()),
+            ValueImpl::Unit => Ok(()),
             _ => Err(value),
         }
     }
@@ -24,7 +24,7 @@ impl<'a> TryFrom<&'a Value> for () {
 
     fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
         match value.0 {
-            ValueStorage::Unit => Ok(()),
+            ValueImpl::Unit => Ok(()),
             _ => Err(value),
         }
     }
@@ -169,8 +169,8 @@ pub struct Tuple(pub Box<[Value]>);
 impl From<Tuple> for Value {
     fn from(mut value: Tuple) -> Self {
         match value.0.len() {
-            0 => Self(ValueStorage::Unit),
-            1 => Self(ValueStorage::Tuple1(Arc::new([value
+            0 => Self(ValueImpl::Unit),
+            1 => Self(ValueImpl::Tuple1(Arc::new([value
                 .0
                 .iter_mut()
                 .map(take)
@@ -178,20 +178,20 @@ impl From<Tuple> for Value {
                 .unwrap()]))),
             2 => {
                 let mut values_iter = value.0.iter_mut().map(take);
-                Self(ValueStorage::Tuple2(Arc::new([
+                Self(ValueImpl::Tuple2(Arc::new([
                     values_iter.next().unwrap(),
                     values_iter.next().unwrap(),
                 ])))
             }
             3 => {
                 let mut values_iter = value.0.iter_mut().map(take);
-                Self(ValueStorage::Tuple3(Arc::new([
+                Self(ValueImpl::Tuple3(Arc::new([
                     values_iter.next().unwrap(),
                     values_iter.next().unwrap(),
                     values_iter.next().unwrap(),
                 ])))
             }
-            _ => Self(ValueStorage::Tuple4OrMore(Arc::new(value.0))),
+            _ => Self(ValueImpl::Tuple4OrMore(Arc::new(value.0))),
         }
     }
 }
@@ -199,15 +199,15 @@ impl From<Tuple> for Value {
 impl From<&Tuple> for Value {
     fn from(value: &Tuple) -> Self {
         match &value.0[..] {
-            [] => Self(ValueStorage::Unit),
-            [t0] => Self(ValueStorage::Tuple1(Arc::new([t0.clone()]))),
-            [t0, t1] => Self(ValueStorage::Tuple2(Arc::new([t0.clone(), t1.clone()]))),
-            [t0, t1, t2] => Self(ValueStorage::Tuple3(Arc::new([
+            [] => Self(ValueImpl::Unit),
+            [t0] => Self(ValueImpl::Tuple1(Arc::new([t0.clone()]))),
+            [t0, t1] => Self(ValueImpl::Tuple2(Arc::new([t0.clone(), t1.clone()]))),
+            [t0, t1, t2] => Self(ValueImpl::Tuple3(Arc::new([
                 t0.clone(),
                 t1.clone(),
                 t2.clone(),
             ]))),
-            values => Self(ValueStorage::Tuple4OrMore(Arc::new(
+            values => Self(ValueImpl::Tuple4OrMore(Arc::new(
                 values.iter().cloned().collect(),
             ))),
         }

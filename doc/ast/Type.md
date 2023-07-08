@@ -1,5 +1,0 @@
-# Type
-
-## Syntax
-
-## Examples

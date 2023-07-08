@@ -2,7 +2,7 @@ use ordered_float::OrderedFloat;
 
 use crate::static_type::StaticType;
 
-use super::{Value, ValueStorage};
+use super::{Value, ValueImpl};
 
 macro_rules! impl_from_for {
     { $( $Variant:ident($T:ty), )* } => {

@@ -1,5 +1,7 @@
 use std::any::{Any, TypeId};
 
+use lazy_static::lazy_static;
+
 use crate::compiler::lexer::{BraceKind, TokenKind};
 
 use super::syntax_tree_node_builder::{Buildable, NodeBuilder};

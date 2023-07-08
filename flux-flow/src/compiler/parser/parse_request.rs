@@ -24,8 +24,8 @@ pub struct Repeat {
 #[derive(Clone, Copy, Debug)]
 pub struct Revert {
     pub token_stream_index: usize,
-    pub alternations: bool,
-    pub build_request: bool,
+    pub alternations_on_match: bool,
+    pub build_request_on_mismatch: bool,
 }
 
 #[derive(Clone, Copy, Debug)]

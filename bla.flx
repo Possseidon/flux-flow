@@ -1,0 +1,35 @@
+
+type A = i32;
+type B = bool;
+type C = (a: A, b: B?);
+type D = (a: A, b: B);
+
+A | B | C | D;
+
+let x: C | D;
+
+let a = x.a; // A
+let b = x.b; // B | B? as only some variants have B
+             // also applies to functions
+
+// T? means Some(T) | None
+
+let v: [](i32?) = [1, 2, 3, (), 4];
+
+type Either = (left: T) | (right: T);
+
+type Person: (
+    name: str,
+    age: usize,
+);
+
+let a: i32? = v.pop();
+
+let x = match x {
+    type Person @(name) => {
+        x + x
+    }
+    () => {
+        0
+    }
+};

@@ -1,0 +1,272 @@
+0 -> 155
+Took 1.662019ms (61 iterations)
+NodeMap(
+    [
+        [
+            Expression {
+                prefix: NodeRef(
+                    0,
+                ),
+                root: NodeRef(
+                    0,
+                ),
+                suffix: NodeRef(
+                    0,
+                ),
+            },
+        ],
+        [
+            Expression {
+                prefix: NodeRef(
+                    3,
+                ),
+                root: NodeRef(
+                    2,
+                ),
+                suffix: NodeRef(
+                    1,
+                ),
+            },
+        ],
+        [
+            Expression {
+                prefix: NodeRef(
+                    6,
+                ),
+                root: NodeRef(
+                    4,
+                ),
+                suffix: NodeRef(
+                    2,
+                ),
+            },
+        ],
+        [
+            Expression {
+                prefix: NodeRef(
+                    9,
+                ),
+                root: NodeRef(
+                    6,
+                ),
+                suffix: NodeRef(
+                    3,
+                ),
+            },
+        ],
+        [
+            Expression {
+                prefix: NodeRef(
+                    12,
+                ),
+                root: NodeRef(
+                    8,
+                ),
+                suffix: NodeRef(
+                    4,
+                ),
+            },
+        ],
+    ],
+)
+Module[5]
+ Item::Function > Function
+  pub_kw: n/a
+  fn_kw: `fn`
+  name: `sqr`
+  pattern: Pattern::VariablePattern > VariablePattern
+   name: `x`
+   type_annotation: TypeAnnotation
+    colon: `:`
+    ty: Type
+     collection_modifiers: CollectionModifierChain[0]
+     root: RootType::Path > Path
+      leading_path_sep: n/a
+      name: `i32`
+      chain: PathResolutionChain[0]
+     option: n/a
+  return_type: ReturnType
+   r_arrow: `->`
+   ty: Type
+    collection_modifiers: CollectionModifierChain[0]
+    root: RootType::Path > Path
+     leading_path_sep: n/a
+     name: `i32`
+     chain: PathResolutionChain[0]
+    option: n/a
+  block: Block[1]
+   Statement::Expression > Expression
+    prefix: PrefixOperationChain[0]
+    root: RootExpression::Argument > ArgumentExpression::Path > Path
+     leading_path_sep: n/a
+     name: `x`
+     chain: PathResolutionChain[0]
+    suffix: SuffixOperationChain[1]
+     SuffixOperation::Binary > BinaryOperation
+      operator: BinaryOperator: `*`
+      expression: SuffixExpression
+       prefix: PrefixOperationChain[0]
+       root: RootExpression::Argument > ArgumentExpression::Path > Path
+        leading_path_sep: n/a
+        name: `x`
+        chain: PathResolutionChain[0]
+ Item::Function > Function
+  pub_kw: n/a
+  fn_kw: `fn`
+  name: `sqr`
+  pattern: Pattern::VariablePattern > VariablePattern
+   name: `x`
+   type_annotation: TypeAnnotation
+    colon: `:`
+    ty: Type
+     collection_modifiers: CollectionModifierChain[0]
+     root: RootType::Path > Path
+      leading_path_sep: n/a
+      name: `i32`
+      chain: PathResolutionChain[0]
+     option: n/a
+  return_type: ReturnType
+   r_arrow: `->`
+   ty: Type
+    collection_modifiers: CollectionModifierChain[0]
+    root: RootType::Path > Path
+     leading_path_sep: n/a
+     name: `i32`
+     chain: PathResolutionChain[0]
+    option: n/a
+  block: Block[1]
+   Statement::Expression > Expression
+    prefix: PrefixOperationChain[0]
+    root: RootExpression::Argument > ArgumentExpression::Path > Path
+     leading_path_sep: n/a
+     name: `x`
+     chain: PathResolutionChain[0]
+    suffix: SuffixOperationChain[1]
+     SuffixOperation::Binary > BinaryOperation
+      operator: BinaryOperator: `*`
+      expression: SuffixExpression
+       prefix: PrefixOperationChain[0]
+       root: RootExpression::Argument > ArgumentExpression::Path > Path
+        leading_path_sep: n/a
+        name: `x`
+        chain: PathResolutionChain[0]
+ Item::Function > Function
+  pub_kw: n/a
+  fn_kw: `fn`
+  name: `sqr`
+  pattern: Pattern::VariablePattern > VariablePattern
+   name: `x`
+   type_annotation: TypeAnnotation
+    colon: `:`
+    ty: Type
+     collection_modifiers: CollectionModifierChain[0]
+     root: RootType::Path > Path
+      leading_path_sep: n/a
+      name: `i32`
+      chain: PathResolutionChain[0]
+     option: n/a
+  return_type: ReturnType
+   r_arrow: `->`
+   ty: Type
+    collection_modifiers: CollectionModifierChain[0]
+    root: RootType::Path > Path
+     leading_path_sep: n/a
+     name: `i32`
+     chain: PathResolutionChain[0]
+    option: n/a
+  block: Block[1]
+   Statement::Expression > Expression
+    prefix: PrefixOperationChain[0]
+    root: RootExpression::Argument > ArgumentExpression::Path > Path
+     leading_path_sep: n/a
+     name: `x`
+     chain: PathResolutionChain[0]
+    suffix: SuffixOperationChain[1]
+     SuffixOperation::Binary > BinaryOperation
+      operator: BinaryOperator: `*`
+      expression: SuffixExpression
+       prefix: PrefixOperationChain[0]
+       root: RootExpression::Argument > ArgumentExpression::Path > Path
+        leading_path_sep: n/a
+        name: `x`
+        chain: PathResolutionChain[0]
+ Item::Function > Function
+  pub_kw: n/a
+  fn_kw: `fn`
+  name: `sqr`
+  pattern: Pattern::VariablePattern > VariablePattern
+   name: `x`
+   type_annotation: TypeAnnotation
+    colon: `:`
+    ty: Type
+     collection_modifiers: CollectionModifierChain[0]
+     root: RootType::Path > Path
+      leading_path_sep: n/a
+      name: `i32`
+      chain: PathResolutionChain[0]
+     option: n/a
+  return_type: ReturnType
+   r_arrow: `->`
+   ty: Type
+    collection_modifiers: CollectionModifierChain[0]
+    root: RootType::Path > Path
+     leading_path_sep: n/a
+     name: `i32`
+     chain: PathResolutionChain[0]
+    option: n/a
+  block: Block[1]
+   Statement::Expression > Expression
+    prefix: PrefixOperationChain[0]
+    root: RootExpression::Argument > ArgumentExpression::Path > Path
+     leading_path_sep: n/a
+     name: `x`
+     chain: PathResolutionChain[0]
+    suffix: SuffixOperationChain[1]
+     SuffixOperation::Binary > BinaryOperation
+      operator: BinaryOperator: `*`
+      expression: SuffixExpression
+       prefix: PrefixOperationChain[0]
+       root: RootExpression::Argument > ArgumentExpression::Path > Path
+        leading_path_sep: n/a
+        name: `x`
+        chain: PathResolutionChain[0]
+ Item::Function > Function
+  pub_kw: n/a
+  fn_kw: `fn`
+  name: `sqr`
+  pattern: Pattern::VariablePattern > VariablePattern
+   name: `x`
+   type_annotation: TypeAnnotation
+    colon: `:`
+    ty: Type
+     collection_modifiers: CollectionModifierChain[0]
+     root: RootType::Path > Path
+      leading_path_sep: n/a
+      name: `i32`
+      chain: PathResolutionChain[0]
+     option: n/a
+  return_type: ReturnType
+   r_arrow: `->`
+   ty: Type
+    collection_modifiers: CollectionModifierChain[0]
+    root: RootType::Path > Path
+     leading_path_sep: n/a
+     name: `i32`
+     chain: PathResolutionChain[0]
+    option: n/a
+  block: Block[1]
+   Statement::Expression > Expression
+    prefix: PrefixOperationChain[0]
+    root: RootExpression::Argument > ArgumentExpression::Path > Path
+     leading_path_sep: n/a
+     name: `x`
+     chain: PathResolutionChain[0]
+    suffix: SuffixOperationChain[1]
+     SuffixOperation::Binary > BinaryOperation
+      operator: BinaryOperator: `*`
+      expression: SuffixExpression
+       prefix: PrefixOperationChain[0]
+       root: RootExpression::Argument > ArgumentExpression::Path > Path
+        leading_path_sep: n/a
+        name: `x`
+        chain: PathResolutionChain[0]

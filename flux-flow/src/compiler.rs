@@ -1,21 +1,33 @@
-pub mod assembler;
 pub mod diagnostic;
 pub mod lexer;
 pub mod parser;
-pub mod resolver;
 
-pub fn compile(code: &str) -> assembler::AssembleResult {
-    let parse_result = parser::parse(code);
+// struct ModuleInterface {
+//     name: String,
+//     // modules: BTreeMap<String, Module>,
+//     // uses: BTreeMap<String, Use>,
+//     functions: BTreeMap<String, Function>,
+// }
 
-    let mut resolve_result = resolver::resolve(code, parse_result.syntax_tree);
-    resolve_result.diagnostics.extend(parse_result.diagnostics);
-    let Some(ast) = resolve_result.value else {
-        return assembler::AssembleResult::error(code, resolve_result.diagnostics);
-    };
+// enum Access {
+//     Private,
+//     Public,
+//     PublicCrate,
+// }
 
-    let mut assemble_result = assembler::assemble(code, ast);
-    assemble_result
-        .diagnostics
-        .extend(resolve_result.diagnostics);
-    assemble_result
-}
+// struct Module {
+//     access: Access,
+//     name: String,
+// }
+
+// struct Use {
+//     access: Access,
+//     path: Path,
+// }
+
+// struct Function {
+//     access: Access,
+//     name: String,
+//     parameter_type: Type,
+//     return_type: Type,
+// }

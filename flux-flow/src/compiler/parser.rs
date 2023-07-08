@@ -123,13 +123,13 @@ impl ParseState {
                 ParseMode::Required => BuildRequestPostAction::TreatMissingAsError,
                 ParseMode::Optional => BuildRequestPostAction::Revert(Revert {
                     token_stream_index: self.push_token_stream(),
-                    alternations: false,
-                    build_request: false,
+                    alternations_on_match: false,
+                    build_request_on_mismatch: false,
                 }),
                 ParseMode::Essential => BuildRequestPostAction::Revert(Revert {
                     token_stream_index: self.push_token_stream(),
-                    alternations: false,
-                    build_request: true,
+                    alternations_on_match: false,
+                    build_request_on_mismatch: true,
                 }),
                 ParseMode::Repetition(repeat_until) => BuildRequestPostAction::Repeat(Repeat {
                     token_stream_index: self.push_token_stream(),
@@ -137,8 +137,8 @@ impl ParseState {
                 }),
                 ParseMode::Alternation => BuildRequestPostAction::Revert(Revert {
                     token_stream_index: self.push_token_stream(),
-                    alternations: true,
-                    build_request: false,
+                    alternations_on_match: true,
+                    build_request_on_mismatch: false,
                 }),
             },
         });
@@ -236,7 +236,7 @@ impl ParseState {
             }
 
             (token, ParseMode::Essential) => {
-                self.revert_build_request(code, grammar, token_kind.name(), token);
+                self.revert_build_request_after_mismatch(code, grammar, token_kind.name(), token);
             }
 
             (Some(token), ParseMode::Required) => {
@@ -341,7 +341,7 @@ impl ParseState {
                     }
                     BuildRequestPostAction::Revert(revert) => {
                         self.commit_token_stream(revert.token_stream_index);
-                        if revert.alternations {
+                        if revert.alternations_on_match {
                             self.parse_requests.pop_remaining_alternations();
                         }
                     }
@@ -366,12 +366,14 @@ impl ParseState {
                     }
                     BuildRequestPostAction::Revert(revert) => {
                         self.revert_token_stream(revert.token_stream_index);
-                        if revert.alternations {
-                            self.parse_requests.pop_remaining_alternations();
-                        }
-                        if revert.build_request {
+                        if revert.build_request_on_mismatch {
                             let token = self.next_token(code);
-                            self.revert_build_request(code, grammar, named_rule.name, token);
+                            self.revert_build_request_after_mismatch(
+                                code,
+                                grammar,
+                                named_rule.name,
+                                token,
+                            );
                         } else {
                             self.node_builder_input.push(NodeBuilderElement::Empty);
                         }
@@ -427,9 +429,6 @@ impl ParseState {
                 }
                 BuildRequestPostAction::Revert(revert) => {
                     self.commit_token_stream(revert.token_stream_index);
-                    if revert.alternations {
-                        self.parse_requests.pop_remaining_alternations();
-                    }
                     self.node_builder_input.push(NodeBuilderElement::Error);
                 }
             },
@@ -446,7 +445,7 @@ impl ParseState {
         self.token_streams.drain(token_stream_index..);
     }
 
-    fn revert_build_request(
+    fn revert_build_request_after_mismatch(
         &mut self,
         code: &str,
         grammar: &Grammar,
@@ -478,7 +477,7 @@ impl ParseState {
                 }
                 BuildRequestPostAction::Revert(revert) => {
                     self.revert_token_stream(revert.token_stream_index);
-                    if revert.build_request {
+                    if revert.build_request_on_mismatch {
                         next_build_request = Some(self.parse_requests.pop_build_request());
                     } else {
                         self.node_builder_input.push(NodeBuilderElement::Empty);
@@ -489,15 +488,11 @@ impl ParseState {
     }
 
     /// Returns the next token of the token stream, processing all lex errors that may occur.
-    ///
-    /// Only lex errors are advanced, the final token will not be advanced yet to allow for proper
-    /// handling of nested token streams.
     fn next_token(&mut self, code: &str) -> Option<lexer::Token> {
         loop {
             match self.token_stream().peek(code) {
-                Some(Ok(next_token)) => break Some(next_token),
-                Some(Err(error)) => self.process_lex_error(code, error),
-                None => break None,
+                Ok(next_token) => break next_token,
+                Err(error) => self.process_lex_error(code, error),
             }
         }
     }
