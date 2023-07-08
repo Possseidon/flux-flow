@@ -489,15 +489,11 @@ impl ParseState {
     }
 
     /// Returns the next token of the token stream, processing all lex errors that may occur.
-    ///
-    /// Only lex errors are advanced, the final token will not be advanced yet to allow for proper
-    /// handling of nested token streams.
     fn next_token(&mut self, code: &str) -> Option<lexer::Token> {
         loop {
             match self.token_stream().peek(code) {
-                Some(Ok(next_token)) => break Some(next_token),
-                Some(Err(error)) => self.process_lex_error(code, error),
-                None => break None,
+                Ok(next_token) => break next_token,
+                Err(error) => self.process_lex_error(code, error),
             }
         }
     }
