@@ -23,78 +23,6 @@ pub struct SyntaxTree {
     nodes: SyntaxTreeNodes,
 }
 
-#[derive(Debug, Default)]
-struct SyntaxTreeNodes {
-    argument_expression_nodes: Vec<ArgumentExpression>,
-    array_literal_nodes: Vec<ArrayLiteral>,
-    array_updater_nodes: Vec<ArrayUpdater>,
-    binary_operation_nodes: Vec<BinaryOperation>,
-    binary_operator_nodes: Vec<BinaryOperator>,
-    block_nodes: Vec<Block>,
-    break_expression_nodes: Vec<BreakExpression>,
-    collection_modifier_chain_nodes: Vec<CollectionModifierChain>,
-    collection_modifier_kind_nodes: Vec<CollectionModifierKind>,
-    collection_modifier_nodes: Vec<CollectionModifier>,
-    condition_nodes: Vec<Condition>,
-    continue_expression_nodes: Vec<ContinueExpression>,
-    control_flow_block_nodes: Vec<ControlFlowBlock>,
-    else_block_nodes: Vec<ElseBlock>,
-    else_if_block_nodes: Vec<ElseIfBlock>,
-    else_if_chain_nodes: Vec<ElseIfChain>,
-    expression_group_nodes: Vec<ExpressionGroup>,
-    expression_nodes: Vec<Expression>,
-    for_block_nodes: Vec<ForBlock>,
-    function_nodes: Vec<Function>,
-    if_block_nodes: Vec<IfBlock>,
-    index_expression_nodes: Vec<IndexExpression>,
-    index_operation_nodes: Vec<IndexOperation>,
-    index_operator_nodes: Vec<IndexOperator>,
-    item_nodes: Vec<Item>,
-    key_value_nodes: Vec<KeyValue>,
-    label_nodes: Vec<Label>,
-    labeled_control_flow_block_nodes: Vec<LabeledControlFlowBlock>,
-    let_statement_nodes: Vec<LetStatement>,
-    loop_block_nodes: Vec<LoopBlock>,
-    map_entry_chain_nodes: Vec<MapEntryChain>,
-    map_literal_nodes: Vec<MapLiteral>,
-    match_arm_nodes: Vec<MatchArm>,
-    match_block_nodes: Vec<MatchBlock>,
-    match_body_nodes: Vec<MatchBody>,
-    module_block_nodes: Vec<ModuleBlock>,
-    module_nodes: Vec<Module>,
-    path_nodes: Vec<Path>,
-    path_resolution_chain_nodes: Vec<PathResolutionChain>,
-    path_resolution_nodes: Vec<PathResolution>,
-    pattern_nodes: Vec<Pattern>,
-    prefix_operation_chain_nodes: Vec<PrefixOperationChain>,
-    prefix_operation_nodes: Vec<PrefixOperation>,
-    return_expression_nodes: Vec<ReturnExpression>,
-    return_type_nodes: Vec<ReturnType>,
-    root_expression_nodes: Vec<RootExpression>,
-    root_type_nodes: Vec<RootType>,
-    set_item_chain_nodes: Vec<SetItemChain>,
-    set_literal_nodes: Vec<SetLiteral>,
-    statement_nodes: Vec<Statement>,
-    struct_field_name_nodes: Vec<StructFieldName>,
-    struct_field_nodes: Vec<StructField>,
-    struct_field_type_chain_nodes: Vec<StructFieldTypeChain>,
-    struct_field_type_nodes: Vec<StructFieldType>,
-    struct_literal_nodes: Vec<StructLiteral>,
-    struct_type_nodes: Vec<StructType>,
-    sub_module_nodes: Vec<SubModule>,
-    suffix_expression_nodes: Vec<SuffixExpression>,
-    suffix_operation_chain_nodes: Vec<SuffixOperationChain>,
-    suffix_operation_nodes: Vec<SuffixOperation>,
-    trailing_comma_expression_nodes: Vec<TrailingCommaExpression>,
-    type_annotation_nodes: Vec<TypeAnnotation>,
-    type_expression_nodes: Vec<TypeExpression>,
-    type_group_nodes: Vec<TypeGroup>,
-    type_nodes: Vec<Type>,
-    unary_operator_nodes: Vec<UnaryOperator>,
-    variable_pattern_nodes: Vec<VariablePattern>,
-    while_block_nodes: Vec<WhileBlock>,
-}
-
 impl SyntaxTree {
     pub fn new(initial_whitespace: usize) -> Self {
         Self {
@@ -545,11 +473,11 @@ macro_rules! impl_node_ref_helpers {
 }
 
 macro_rules! concatenation {
-    { $T:ident {
+    ( $T:ident {
         $( $essential_fields:ident: $EssentialFields:tt, )*
         > $last_essential_field:ident: $LastEssentialField:tt,
         $( $required_fields:ident: $RequiredFields:tt, )*
-    } } => {
+    } ) => {
         #[derive(Clone, Copy, Debug)]
         pub struct $T {
             $( pub $essential_fields: field_type!($EssentialFields), )*
@@ -615,9 +543,9 @@ macro_rules! concatenation {
 }
 
 macro_rules! alternation {
-    { $T:ident {
+    ( $T:ident {
         $( $alternative:ident: $Alternative:tt, )*
-    } } => {
+    } ) => {
         #[derive(Clone, Copy, Debug)]
         pub enum $T {
             $( $alternative(field_type!($Alternative)), )*
@@ -641,7 +569,7 @@ macro_rules! alternation {
                 if with_indent { print_indent(indent); }
                 print!("{}::", <Self as Buildable>::name());
                 match &self {
-                    $( $T::$alternative(node_or_token) => {
+                    $( Self::$alternative(node_or_token) => {
                         print!("{} > ", stringify!($alternative));
                         visualize!(syntax_tree code indent false node_or_token $Alternative);
                     } )*
@@ -663,72 +591,6 @@ macro_rules! alternation {
             }
 
             paste! {
-                fn build(
-                    syntax_tree: &mut SyntaxTree,
-                    reader: &mut NodeBuilderReader,
-                ) -> Result<Option<UntypedNodeRef>, NodeBuilderError> {
-                    let node_ref = UntypedNodeRef(syntax_tree.nodes.[<$T:snake _nodes>].len());
-                    $(
-                        if let Some(node) = reader.read()? {
-                            syntax_tree.nodes.[<$T:snake _nodes>].push($T::$alternative(node));
-                            return Ok(Some(node_ref));
-                        }
-                    )*
-                    Ok(None)
-                }
-            }
-        }
-    };
-}
-
-macro_rules! token_alternation {
-    { $T:ident {
-        $( $alternative:ident $( $alternative_node:ident )?: $Alternative:tt, )*
-    } } => {
-        #[derive(Clone, Copy, Debug)]
-        pub enum $T {
-            $( $alternative(field_type!($Alternative)), )*
-        }
-
-        impl $T {
-            pub fn grammar() -> &'static Grammar {
-                lazy_static! {
-                    static ref GRAMMAR: Grammar = Grammar::new::<$T>();
-                }
-                &GRAMMAR
-            }
-
-            pub fn visualize(
-                &self,
-                syntax_tree: &SyntaxTree,
-                code: &str,
-                indent: usize,
-                with_indent: bool,
-            ) {
-                if with_indent { print_indent(indent); }
-                print!("{}: ", <Self as Buildable>::name());
-                match &self {
-                    $( Self::$alternative(node_or_token) => {
-                        visualize!(syntax_tree code indent false node_or_token $Alternative);
-                    } )*
-                }
-            }
-        }
-
-        impl_node_ref_helpers!($T);
-
-        impl Buildable for $T {
-            fn name() -> &'static str {
-                stringify!($T)
-            }
-
-            fn rule(#[allow(unused_variables)] grammar: &mut GrammarBuilder) -> RecursiveRule {
-                RecursiveRule::Alternation(vec![
-                    $( rule!(grammar $Alternative), )*
-                ])
-            }
-
-            paste!{
                 fn build(
                     syntax_tree: &mut SyntaxTree,
                     reader: &mut NodeBuilderReader,
@@ -815,7 +677,7 @@ macro_rules! repetition_helper {
 }
 
 macro_rules! global_repetition {
-    ( $T:ident => $field:ident: $Field:tt ) => {
+    ( $T:ident { $field:ident: $Field:tt } ) => {
         repetition_helper!($T GlobalRepetition $field $Field);
     };
 }
@@ -861,7 +723,6 @@ macro_rules! braced_repetition_helper {
                     stringify!($T)
                 }
 
-                #[allow(unused_variables)]
                 fn rule(#[allow(unused_variables)] grammar: &mut GrammarBuilder) -> RecursiveRule {
                     RecursiveRule::BracedRepetition(BraceKind::$brace_kind, rule!(grammar $Field))
                 }
@@ -884,21 +745,36 @@ macro_rules! braced_repetition_helper {
 }
 
 macro_rules! repetition {
-    ( $T:ident => $field:ident: $Field:tt ) => {
+    ( $T:ident { $field:ident: $Field:tt } ) => {
         repetition_helper!($T Repetition $field $Field);
     };
-    ( $T:ident => ( $field:ident: $Field:tt ) ) => {
+    ( $T:ident { ($field:ident): $Field:tt } ) => {
         braced_repetition_helper!($T opening_paren closing_paren Paren $field $Field);
     };
-    ( $T:ident => [ $field:ident: $Field:tt ] ) => {
+    ( $T:ident { [$field:ident]: $Field:tt } ) => {
         braced_repetition_helper!($T opening_brack closing_brack Brack $field $Field);
     };
-    ( $T:ident => { $field:ident: $Field:tt } ) => {
+    ( $T:ident { {$field:ident}: $Field:tt } ) => {
         braced_repetition_helper!($T opening_curly closing_curly Curly $field $Field);
     };
 }
 
-alternation! { ArgumentExpression {
+macro_rules! syntax_tree_nodes {
+    ( $( $T:ident: $macro:ident $body:tt )* ) => {
+        paste! {
+            #[derive(Debug, Default)]
+            struct SyntaxTreeNodes {
+                $( [<$T:snake _nodes>]: Vec<$T>, )*
+            }
+        }
+
+        $( $macro!( $T $body ); )*
+    };
+}
+
+syntax_tree_nodes! {
+
+ArgumentExpression: alternation {
     False: False,
     True: True,
     Integer: Integer,
@@ -919,18 +795,18 @@ alternation! { ArgumentExpression {
     TypeWithPrefix: (ref TypeExpression),
     // Type last, as it has overlap with literals which must be resolved using the `type` prefix.
     Type: (ref Type),
-} }
+}
 
-repetition!(ArrayLiteral => [ items: (ref TrailingCommaExpression) ]);
+ArrayLiteral: repetition { [items]: (ref TrailingCommaExpression) }
 
-repetition!(ArrayUpdater => [ assignments: (ref KeyValue) ]);
+ArrayUpdater: repetition { [assignments]: (ref KeyValue) }
 
-concatenation! { BinaryOperation {
+BinaryOperation: concatenation {
     > operator: (ref BinaryOperator),
     expression: (ref SuffixExpression),
-} }
+}
 
-token_alternation! { BinaryOperator {
+BinaryOperator: alternation {
     Add: Plus,
     Sub: Minus,
     Mul: Star,
@@ -960,237 +836,237 @@ token_alternation! { BinaryOperator {
     BitXorAssign: CaretEq,
     ShlAssign: ShlEq,
     ShrAssign: ShrEq,
-} }
+}
 
-repetition!(Block => { statements: (ref Statement) });
+Block: repetition { {statements}: (ref Statement) }
 
-concatenation! { BreakExpression {
+BreakExpression: concatenation {
     > break_kw: Break,
     label: [Label],
     expression: [ref Expression],
-} }
+}
 
-concatenation! { CollectionModifier {
+CollectionModifier: concatenation {
     > opening_brack: LBrack,
     kind: [ref CollectionModifierKind],
     closing_brack: RBrack,
-}}
+}
 
-repetition!(CollectionModifierChain => modifiers: (ref CollectionModifier));
+CollectionModifierChain: repetition { modifiers: (ref CollectionModifier) }
 
-alternation! { CollectionModifierKind {
+CollectionModifierKind: alternation {
     Array: Integer,
     Deque: Tilde,
     Set: Lt,
     Map: (ref Type),
-} }
+}
 
-alternation! { Condition {
+Condition: alternation {
     // TODO: Different from LetStatement
     // Let: (ref LetStatement),
     Expression: (ref Expression),
-} }
+}
 
-concatenation! { ContinueExpression {
+ContinueExpression: concatenation {
     > continue_kw: Continue,
     label: [Label],
-} }
+}
 
-alternation! { ControlFlowBlock {
+ControlFlowBlock: alternation {
     Block: (ref Block),
     For: (ref ForBlock),
     Loop: (ref LoopBlock),
     While: (ref WhileBlock),
-} }
+}
 
-concatenation! { ElseBlock {
+ElseBlock: concatenation {
     > else_kw: Else,
     block: (ref Block),
-} }
+}
 
-concatenation! { ElseIfBlock {
+ElseIfBlock: concatenation {
     else_kw: Else,
     > if_kw: If,
     condition: (ref Condition),
     block: (ref Block),
-} }
+}
 
-repetition!(ElseIfChain => else_if_blocks: (ref ElseIfBlock));
+ElseIfChain: repetition { else_if_blocks: (ref ElseIfBlock) }
 
-concatenation! { Expression {
+Expression: concatenation {
     prefix: (ref PrefixOperationChain),
     > root: (ref RootExpression),
     suffix: (ref SuffixOperationChain),
-} }
+}
 
-concatenation! { ExpressionGroup {
+ExpressionGroup: concatenation {
     > opening_paren: LParen,
     expression: (ref Expression),
     closing_paren: RParen,
-} }
+}
 
-concatenation! { ForBlock {
+ForBlock: concatenation {
     > for_kw: For,
     pattern: (ref Pattern),
     in_kw: In,
     expression: (ref Expression),
     block: (ref Block),
-} }
+}
 
-concatenation! { Function {
+Function: concatenation {
     pub_kw: [Pub],
     > fn_kw: Fn,
     name: Ident,
     pattern: (ref Pattern),
     return_type: [ref ReturnType],
     block: (ref Block),
-} }
+}
 
-concatenation! { IfBlock {
+IfBlock: concatenation {
     > if_kw: If,
     condition: (ref Condition),
     block: (ref Block),
     else_if_chain: (ref ElseIfChain),
     else_block: [ref ElseBlock],
-} }
+}
 
-alternation! { IndexExpression {
+IndexExpression: alternation {
     Name: Ident,
     StructUpdate: (ref StructLiteral),
     ArrayUpdate: (ref ArrayUpdater),
     MapUpdate: (ref MapLiteral),
-} }
+}
 
-concatenation! { IndexOperation {
+IndexOperation: concatenation {
     > operator: (ref IndexOperator),
     expression: (ref IndexExpression),
-} }
+}
 
-token_alternation! { IndexOperator {
+IndexOperator: alternation {
     Dot: Dot,
     DotAssign: DotEq,
-} }
+}
 
-alternation! { Item {
+Item: alternation {
     SubModule: (ref SubModule),
     Function: (ref Function),
-} }
+}
 
-concatenation! { KeyValue {
+KeyValue: concatenation {
     > key: (ref Expression),
     colon: Colon,
     value: (ref Expression),
     comma: [Comma],
-} }
+}
 
-concatenation! { Label {
+Label: concatenation {
     > label: Label,
     colon: Colon,
-} }
+}
 
-concatenation! { LabeledControlFlowBlock {
+LabeledControlFlowBlock: concatenation {
     // TODO: Optional essential would simplify this as well.
     > label: (ref Label),
     control_flow: (ref ControlFlowBlock),
-} }
+}
 
-concatenation! { LetStatement {
+LetStatement: concatenation {
     > let_kw: Let,
     name: Ident,
     type_annotation: [ref TypeAnnotation],
     eq: Eq,
     expression: (ref Expression),
-} }
+}
 
-concatenation! { LoopBlock {
+LoopBlock: concatenation {
     > loop_kw: Loop,
     block: (ref Block),
-} }
+}
 
-repetition!(MapEntryChain => { entries: (ref KeyValue) });
+MapEntryChain: repetition { {entries}: (ref KeyValue) }
 
-concatenation! { MapLiteral {
+MapLiteral: concatenation {
     at: At,
     > content: (ref MapEntryChain),
-} }
+}
 
-concatenation! { MatchArm {
+MatchArm: concatenation {
     > pattern: (ref Pattern),
     fat_arrow: FatArrow,
     expression: (ref Expression),
     comma: [Comma],
-} }
+}
 
-concatenation! { MatchBlock {
+MatchBlock: concatenation {
     > match_kw: Match,
     expression: (ref Expression),
     block: (ref MatchBody),
-} }
+}
 
-repetition!(MatchBody => { arms: (ref MatchArm) });
+MatchBody: repetition { {arms}: (ref MatchArm) }
 
-global_repetition!(Module => items: (ref Item));
+Module: global_repetition { items: (ref Item) }
 
-repetition!(ModuleBlock => { items: (ref Item) });
+ModuleBlock: repetition { {items}: (ref Item) }
 
-concatenation! { Path {
+Path: concatenation {
     leading_path_sep: [PathSep],
     > name: Ident,
     chain: (ref PathResolutionChain),
-} }
+}
 
-concatenation! { PathResolution {
+PathResolution: concatenation {
     > path_sep: PathSep,
     name: Ident,
-} }
+}
 
-repetition!(PathResolutionChain => chain: (ref PathResolution));
+PathResolutionChain: repetition { chain: (ref PathResolution) }
 
-alternation! { Pattern {
+Pattern: alternation {
     Discard: Underscore,
     VariablePattern: (ref VariablePattern),
     StructDestructure: Underscore, // TODO
     ArrayDestructure: Underscore, // TODO
-} }
+}
 
-alternation! { PrefixOperation {
+PrefixOperation: alternation {
     UnaryOperator: (ref UnaryOperator),
-} }
+}
 
-repetition!(PrefixOperationChain => operations: (ref PrefixOperation));
+PrefixOperationChain: repetition { operations: (ref PrefixOperation) }
 
-concatenation! { ReturnExpression {
+ReturnExpression: concatenation {
     > return_kw: Return,
     expression: [ref Expression],
-} }
+}
 
-concatenation! { ReturnType {
+ReturnType: concatenation {
     > r_arrow: RArrow,
     ty: (ref Type),
-} }
+}
 
-alternation! { RootExpression {
+RootExpression: alternation {
     LabeledControlFlow: (ref LabeledControlFlowBlock),
     ControlFlow: (ref ControlFlowBlock),
     Argument: (ref ArgumentExpression),
-} }
+}
 
-alternation! { RootType {
+RootType: alternation {
     Deduce: Underscore,
     Never: Not,
     Path: (ref Path),
     Struct: (ref StructType),
     Group: (ref TypeGroup),
-} }
+}
 
-repetition!(SetItemChain => { items: (ref TrailingCommaExpression) });
+SetItemChain: repetition { {items}: (ref TrailingCommaExpression) }
 
-concatenation! { SetLiteral {
+SetLiteral: concatenation {
     > pound: Pound,
     content: (ref SetItemChain),
-} }
+}
 
-alternation! { Statement {
+Statement: alternation {
     Semi: Semi,
     Let: (ref LetStatement),
     // If: (ref IfBlock),
@@ -1199,72 +1075,72 @@ alternation! { Statement {
     // ControlFlow: (ref ControlFlowBlock),
     // Expression after blocks as they overlap.
     Expression: (ref Expression),
-} }
+}
 
-concatenation! { StructField {
+StructField: concatenation {
     name: [ref StructFieldName],
     > colon: Colon,
     expression: (ref Expression),
     comma: [Comma],
-} }
+}
 
-concatenation! { StructFieldName {
+StructFieldName: concatenation {
     name: Ident,
     > colon: Colon,
-} }
+}
 
-concatenation! { StructFieldType {
+StructFieldType: concatenation {
     name: (ref StructFieldName),
     > ty: (ref Type),
     comma: [Comma],
-} }
+}
 
-repetition!(StructFieldTypeChain => ( fields: (ref StructFieldType) ));
+StructFieldTypeChain: repetition { (fields): (ref StructFieldType) }
 
-repetition!(StructLiteral => ( fields: (ref StructField) ));
+StructLiteral: repetition { (fields): (ref StructField) }
 
-concatenation! { StructType {
+StructType: concatenation {
     at: At,
     > types: (ref StructFieldTypeChain),
-} }
+}
 
-concatenation! { SubModule {
+SubModule: concatenation {
     > mod_kw: Mod,
     name: Ident,
     block: (ref ModuleBlock),
-} }
+}
 
-concatenation! { SuffixExpression {
+SuffixExpression: concatenation {
     prefix: (ref PrefixOperationChain),
     > root: (ref RootExpression),
-} }
+}
 
-alternation! { SuffixOperation {
+SuffixOperation: alternation {
     Binary: (ref BinaryOperation),
     Index: (ref IndexOperation),
     Call: (ref ArgumentExpression),
-} }
+}
 
-repetition!(SuffixOperationChain => operations: (ref SuffixOperation));
+SuffixOperationChain: repetition { operations: (ref SuffixOperation) }
 
-concatenation! { TrailingCommaExpression {
+TrailingCommaExpression: concatenation {
     > expression: (ref Expression),
     comma: [Comma],
-} }
+}
 
-concatenation! { Type {
+Type: concatenation {
     collection_modifiers: (ref CollectionModifierChain),
     > root: (ref RootType),
     // TODO: generics
     option: [Question],
-} }
+}
 
-concatenation! { TypeAnnotation {
+TypeAnnotation: concatenation {
     > colon: Colon,
     ty: (ref Type),
-} }
+}
 
-concatenation! { TypeExpression {
+TypeExpression: concatenation {
     // TODO: Type is both essential but also optional
     //       "Optional" is currently implemented with separate expression alternatives
     //       -> Make last_essential optional as well to simplify this use-case?
@@ -1272,26 +1148,28 @@ concatenation! { TypeExpression {
     //       Update: Or should `ty` just be the last essential instead? Did this cause problems?
     > type_kw: Type,
     ty: (ref Type),
-} }
+}
 
-concatenation! { TypeGroup {
+TypeGroup: concatenation {
     > opening_paren: LParen,
     ty: (ref Type),
     closing_paren: RParen,
-} }
+}
 
-token_alternation! { UnaryOperator {
+UnaryOperator: alternation {
     Neg: Minus,
     Not: Not,
-} }
+}
 
-concatenation! { VariablePattern {
+VariablePattern: concatenation {
     > name: Ident,
     type_annotation: [ref TypeAnnotation],
-} }
+}
 
-concatenation! { WhileBlock {
+WhileBlock: concatenation {
     > while_kw: While,
     condition: (ref Condition),
     block: (ref Block),
-} }
+}
+
+}
