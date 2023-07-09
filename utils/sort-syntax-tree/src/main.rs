@@ -8,8 +8,8 @@ fn main() {
 
     groups.sort_unstable_by_key(|group| {
         group.first().map(|line| {
-            line.trim_start_matches(|c| c.is_alphanumeric() || ['_', '!'].contains(&c))
-                .trim_start_matches(['{', '(', ' '])
+            line.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_')
+                .trim_start_matches(['!', ' ', '{', '('])
         })
     });
 
