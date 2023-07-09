@@ -60,6 +60,7 @@ struct SyntaxTreeNodes {
     match_arm_nodes: Vec<MatchArm>,
     match_block_nodes: Vec<MatchBlock>,
     match_body_nodes: Vec<MatchBody>,
+    module_block_nodes: Vec<ModuleBlock>,
     module_nodes: Vec<Module>,
     path_nodes: Vec<Path>,
     path_resolution_chain_nodes: Vec<PathResolutionChain>,
@@ -80,6 +81,7 @@ struct SyntaxTreeNodes {
     struct_field_type_nodes: Vec<StructFieldType>,
     struct_literal_nodes: Vec<StructLiteral>,
     struct_type_nodes: Vec<StructType>,
+    sub_module_nodes: Vec<SubModule>,
     suffix_expression_nodes: Vec<SuffixExpression>,
     suffix_operation_chain_nodes: Vec<SuffixOperationChain>,
     suffix_operation_nodes: Vec<SuffixOperation>,
@@ -1070,6 +1072,7 @@ token_alternation! { IndexOperator {
 } }
 
 alternation! { Item {
+    SubModule: (ref SubModule),
     Function: (ref Function),
 } }
 
@@ -1127,6 +1130,8 @@ concatenation! { MatchBlock {
 repetition!(MatchBody => { arms: (ref MatchArm) });
 
 global_repetition!(Module => items: (ref Item));
+
+repetition!(ModuleBlock => { items: (ref Item) });
 
 concatenation! { Path {
     leading_path_sep: [PathSep],
@@ -1221,6 +1226,12 @@ repetition!(StructLiteral => ( fields: (ref StructField) ));
 concatenation! { StructType {
     at: At,
     > types: (ref StructFieldTypeChain),
+} }
+
+concatenation! { SubModule {
+    > mod_kw: Mod,
+    name: Ident,
+    block: (ref ModuleBlock),
 } }
 
 concatenation! { SuffixExpression {
