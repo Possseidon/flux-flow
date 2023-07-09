@@ -818,12 +818,6 @@ macro_rules! global_repetition {
     };
 }
 
-macro_rules! repetition {
-    ( $T:ident => $field:ident: $Field:tt ) => {
-        repetition_helper!($T Repetition $field $Field);
-    };
-}
-
 macro_rules! braced_repetition_helper {
     ( $T:ident $opening:ident $closing:ident $brace_kind:ident $field:ident $Field:tt ) => {
         paste! {
@@ -887,7 +881,10 @@ macro_rules! braced_repetition_helper {
     };
 }
 
-macro_rules! braced_repetition {
+macro_rules! repetition {
+    ( $T:ident => $field:ident: $Field:tt ) => {
+        repetition_helper!($T Repetition $field $Field);
+    };
     ( $T:ident => ( $field:ident: $Field:tt ) ) => {
         braced_repetition_helper!($T opening_paren closing_paren Paren $field $Field);
     };
@@ -922,9 +919,9 @@ alternation! { ArgumentExpression {
     Type: (ref Type),
 } }
 
-braced_repetition!(ArrayLiteral => [ items: (ref TrailingCommaExpression) ]);
+repetition!(ArrayLiteral => [ items: (ref TrailingCommaExpression) ]);
 
-braced_repetition!(ArrayUpdater => [ assignments: (ref KeyValue) ]);
+repetition!(ArrayUpdater => [ assignments: (ref KeyValue) ]);
 
 concatenation! { BinaryOperation {
     > operator: (ref BinaryOperator),
@@ -963,7 +960,7 @@ token_alternation! { BinaryOperator {
     ShrAssign: ShrEq,
 } }
 
-braced_repetition!(Block => { statements: (ref Statement) });
+repetition!(Block => { statements: (ref Statement) });
 
 concatenation! { BreakExpression {
     > break_kw: Break,
@@ -1107,7 +1104,7 @@ concatenation! { LoopBlock {
     block: (ref Block),
 } }
 
-braced_repetition!(MapEntryChain => { entries: (ref KeyValue) });
+repetition!(MapEntryChain => { entries: (ref KeyValue) });
 
 concatenation! { MapLiteral {
     at: At,
@@ -1127,7 +1124,7 @@ concatenation! { MatchBlock {
     block: (ref MatchBody),
 } }
 
-braced_repetition!(MatchBody => { arms: (ref MatchArm) });
+repetition!(MatchBody => { arms: (ref MatchArm) });
 
 global_repetition!(Module => items: (ref Item));
 
@@ -1181,7 +1178,7 @@ alternation! { RootType {
     Group: (ref TypeGroup),
 } }
 
-braced_repetition!(SetItemChain => { items: (ref TrailingCommaExpression) });
+repetition!(SetItemChain => { items: (ref TrailingCommaExpression) });
 
 concatenation! { SetLiteral {
     > pound: Pound,
@@ -1217,9 +1214,9 @@ concatenation! { StructFieldType {
     comma: [Comma],
 } }
 
-braced_repetition!(StructFieldTypeChain => ( fields: (ref StructFieldType) ));
+repetition!(StructFieldTypeChain => ( fields: (ref StructFieldType) ));
 
-braced_repetition!(StructLiteral => ( fields: (ref StructField) ));
+repetition!(StructLiteral => ( fields: (ref StructField) ));
 
 concatenation! { StructType {
     at: At,
