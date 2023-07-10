@@ -444,15 +444,6 @@ pub enum BraceKind {
 }
 
 impl BraceKind {
-    pub fn from_brace_index(index: BraceIndex) -> Option<Self> {
-        match index {
-            braces::BRACE_PAREN => Some(BraceKind::Paren),
-            braces::BRACE_BRACK => Some(BraceKind::Brack),
-            braces::BRACE_CURLY => Some(BraceKind::Curly),
-            _ => None,
-        }
-    }
-
     pub fn name(self) -> &'static str {
         match self {
             Self::Paren => "`()`",
@@ -494,141 +485,116 @@ impl BraceKind {
     }
 }
 
-pub type BraceIndex = u8;
-
-pub mod braces {
-    // TODO: constants were only necessary for const generics, which are no longer in use
-    pub const BRACE_PAREN: u8 = 0;
-    pub const BRACE_BRACK: u8 = 1;
-    pub const BRACE_CURLY: u8 = 2;
-}
-
 macro_rules! tokens {
-    ( $( $Variant:ident($TK:ident) = $name:literal, )* ) => {
-        pub type TokenIndex = u8;
-
+    ( $( $Variant:ident = $name:literal, )* ) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub enum TokenKind {
             $( $Variant, )*
         }
 
         impl TokenKind {
-            pub fn from_token_index(index: TokenIndex) -> Option<Self> {
-                match index {
-                    $( tokens::$TK => Some(Self::$Variant), )*
-                    _ => None,
-                }
-            }
-
             pub fn name(self) -> &'static str {
                 match self {
                     $( Self::$Variant => $name, )*
                 }
             }
         }
-
-        pub mod tokens {
-            use super::{TokenKind, TokenIndex};
-
-            $( pub const $TK: TokenIndex = TokenKind::$Variant as TokenIndex; )*
-        }
     };
 }
 
 tokens! {
-    // TODO: constants were only necessary for const generics, which are no longer in use
-    Whitespace(TK_WHITESPACE) = "whitespace",
-    LineComment(TK_LINE_COMMENT) = "line comment",
-    BlockComment(TK_BLOCK_COMMENT) = "block comment",
-    DocComment(TK_DOC_COMMENT) = "doc comment",
+    Whitespace = "whitespace",
+    LineComment = "line comment",
+    BlockComment = "block comment",
+    DocComment = "doc comment",
 
-    Ident(TK_IDENT) = "identifier",
-    Integer(TK_INTEGER) = "integer",
-    Float(TK_FLOAT) = "float",
-    String(TK_STRING) = "string",
-    Char(TK_CHAR) = "char",
-    Label(TK_LABEL) = "label",
+    Ident = "identifier",
+    Integer = "integer",
+    Float = "float",
+    String = "string",
+    Char = "char",
+    Label = "label",
 
-    LParen(TK_L_PAREN) = "`(`",
-    RParen(TK_R_PAREN) = "`)`",
-    LBrack(TK_L_BRACK) = "`[`",
-    RBrack(TK_R_BRACK) = "`]`",
-    LCurly(TK_L_CURLY) = "`{`",
-    RCurly(TK_R_CURLY) = "`}`",
-    Plus(TK_PLUS) = "`+`",
-    Minus(TK_MINUS) = "`-`",
-    Star(TK_STAR) = "`*`",
-    Slash(TK_SLASH) = "`/`",
-    Percent(TK_PERCENT) = "`%`",
-    Caret(TK_CARET) = "`^`",
-    Not(TK_NOT) = "`!`",
-    And(TK_AND) = "`&`",
-    Or(TK_OR) = "`|`",
-    AndAnd(TK_AND_AND) = "`&&`",
-    OrOr(TK_OR_OR) = "`||`",
-    Shl(TK_SHL) = "`<<`",
-    Shr(TK_SHR) = "`>>`",
-    PlusEq(TK_PLUS_EQ) = "`+=`",
-    MinusEq(TK_MINUS_EQ) = "`-=`",
-    StarEq(TK_STAR_EQ) = "`*=`",
-    SlashEq(TK_SLASH_EQ) = "`/=`",
-    PercentEq(TK_PERCENT_EQ) = "`%=`",
-    CaretEq(TK_CARET_EQ) = "`^=`",
-    AndEq(TK_AND_EQ) = "`&=`",
-    OrEq(TK_OR_EQ) = "`|=`",
-    ShlEq(TK_SHL_EQ) = "`<<=`",
-    ShrEq(TK_SHR_EQ) = "`>>=`",
-    Eq(TK_EQ) = "`=`",
-    EqEq(TK_EQ_EQ) = "`==`",
-    Ne(TK_NE) = "`!=`",
-    Gt(TK_GT) = "`>`",
-    Lt(TK_LT) = "`<`",
-    Ge(TK_GE) = "`>=`",
-    Le(TK_LE) = "`<=`",
-    At(TK_AT) = "`@`",
-    Underscore(TK_UNDERSCORE) = "`_`",
-    Dot(TK_DOT) = "`.`",
-    DotDot(TK_DOT_DOT) = "`..`",
-    DotEq(TK_DOT_EQ) = "`.=`",
-    DotDotDot(TK_DOT_DOT_DOT) = "`...`",
-    DotDotEq(TK_DOT_DOT_EQ) = "`..=`",
-    Comma(TK_COMMA) = "`,`",
-    Semi(TK_SEMI) = "`;`",
-    Colon(TK_COLON) = "`:`",
-    PathSep(TK_PATH_SEP) = "`::`",
-    RArrow(TK_R_ARROW) = "`->`",
-    FatArrow(TK_FAT_ARROW) = "`=>`",
-    Pound(TK_POUND) = "`#`",
-    Dollar(TK_DOLLAR) = "`$`",
-    Question(TK_QUESTION) = "`?`",
-    Tilde(TK_TILDE) = "`~`",
+    LParen = "`(`",
+    RParen = "`)`",
+    LBrack = "`[`",
+    RBrack = "`]`",
+    LCurly = "`{`",
+    RCurly = "`}`",
+    Plus = "`+`",
+    Minus = "`-`",
+    Star = "`*`",
+    Slash = "`/`",
+    Percent = "`%`",
+    Caret = "`^`",
+    Not = "`!`",
+    And = "`&`",
+    Or = "`|`",
+    AndAnd = "`&&`",
+    OrOr = "`||`",
+    Shl = "`<<`",
+    Shr = "`>>`",
+    PlusEq = "`+=`",
+    MinusEq = "`-=`",
+    StarEq = "`*=`",
+    SlashEq = "`/=`",
+    PercentEq = "`%=`",
+    CaretEq = "`^=`",
+    AndEq = "`&=`",
+    OrEq = "`|=`",
+    ShlEq = "`<<=`",
+    ShrEq = "`>>=`",
+    Eq = "`=`",
+    EqEq = "`==`",
+    Ne = "`!=`",
+    Gt = "`>`",
+    Lt = "`<`",
+    Ge = "`>=`",
+    Le = "`<=`",
+    At = "`@`",
+    Underscore = "`_`",
+    Dot = "`.`",
+    DotDot = "`..`",
+    DotEq = "`.=`",
+    DotDotDot = "`...`",
+    DotDotEq = "`..=`",
+    Comma = "`,`",
+    Semi = "`;`",
+    Colon = "`:`",
+    PathSep = "`::`",
+    RArrow = "`->`",
+    FatArrow = "`=>`",
+    Pound = "`#`",
+    Dollar = "`$`",
+    Question = "`?`",
+    Tilde = "`~`",
 
-    As(KW_AS) = "`as`",
-    Break(KW_BREAK) = "`break`",
-    Continue(KW_CONTINUE) = "`continue`",
-    Crate(KW_CRATE) = "`crate`",
-    Else(KW_ELSE) = "`else`",
-    False(KW_FALSE) = "`false`",
-    Fn(KW_FN) = "`fn`",
-    For(KW_FOR) = "`for`",
-    If(KW_IF) = "`if`",
-    Impl(KW_IMPL) = "`impl`",
-    In(KW_IN) = "`in`",
-    Let(KW_LET) = "`let`",
-    Loop(KW_LOOP) = "`loop`",
-    Match(KW_MATCH) = "`match`",
-    Mod(KW_MOD) = "`mod`",
-    Pub(KW_PUB) = "`pub`",
-    Return(KW_RETURN) = "`return`",
-    SelfValue(KW_SELF_VALUE) = "`self`",
-    SelfType(KW_SELF_TYPE) = "`Self`",
-    Struct(KW_STRUCT) = "`struct`",
-    Super(KW_SUPER) = "`super`",
-    Trait(KW_TRAIT) = "`trait`",
-    True(KW_TRUE) = "`true`",
-    Type(KW_TYPE) = "`type`",
-    Use(KW_USE) = "`use`",
-    While(KW_WHILE) = "`while`",
+    As = "`as`",
+    Break = "`break`",
+    Continue = "`continue`",
+    Crate = "`crate`",
+    Else = "`else`",
+    False = "`false`",
+    Fn = "`fn`",
+    For = "`for`",
+    If = "`if`",
+    Impl = "`impl`",
+    In = "`in`",
+    Let = "`let`",
+    Loop = "`loop`",
+    Match = "`match`",
+    Mod = "`mod`",
+    Pub = "`pub`",
+    Return = "`return`",
+    SelfValue = "`self`",
+    SelfType = "`Self`",
+    Struct = "`struct`",
+    Super = "`super`",
+    Trait = "`trait`",
+    True = "`true`",
+    Type = "`type`",
+    Use = "`use`",
+    While = "`while`",
 }
 
 pub const TOKEN_MAP: &[Option<TokenKind>] = &[
