@@ -441,31 +441,25 @@ pub enum BraceKind {
     Paren,
     Brack,
     Curly,
+    Angle,
 }
 
 impl BraceKind {
     pub fn name(self) -> &'static str {
         match self {
-            Self::Paren => "`()`",
-            Self::Brack => "`[]`",
-            Self::Curly => "`{}`",
+            Self::Paren => "`(...)`",
+            Self::Brack => "`[...]`",
+            Self::Curly => "`{ ... }`", // {} blocks usually have whitespace like that
+            Self::Angle => "`<...>`",
         }
     }
 
     pub fn opening_name(self) -> &'static str {
-        match self {
-            Self::Paren => "`(`",
-            Self::Brack => "`[`",
-            Self::Curly => "`{`",
-        }
+        self.opening_token().name()
     }
 
     pub fn closing_name(self) -> &'static str {
-        match self {
-            Self::Paren => "`)`",
-            Self::Brack => "`]`",
-            Self::Curly => "`}`",
-        }
+        self.closing_token().name()
     }
 
     pub fn opening_token(&self) -> TokenKind {
@@ -473,6 +467,7 @@ impl BraceKind {
             Self::Paren => TokenKind::LParen,
             Self::Brack => TokenKind::LBrack,
             Self::Curly => TokenKind::LCurly,
+            Self::Angle => TokenKind::Lt,
         }
     }
 
@@ -481,6 +476,7 @@ impl BraceKind {
             Self::Paren => TokenKind::RParen,
             Self::Brack => TokenKind::RBrack,
             Self::Curly => TokenKind::RCurly,
+            Self::Angle => TokenKind::Gt,
         }
     }
 }
