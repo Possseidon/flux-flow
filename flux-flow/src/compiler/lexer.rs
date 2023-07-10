@@ -351,21 +351,10 @@ impl TokenStream {
 
     fn ascii_token(self, code: &str) -> Result<Token, LexError> {
         let char = self.rest(code).chars().next().expect("should not be empty");
-        if let Ok(ascii_char) = u8::try_from(char) {
-            if ascii_char > b' ' {
-                if let Some(token_kind) = TOKEN_MAP
-                    .get((ascii_char - b' ' - 1) as usize)
-                    .copied()
-                    .unwrap_or(None)
-                {
-                    return Ok(Token {
-                        token_kind,
-                        len: new_non_zero_usize::<1>(),
-                    });
-                }
-            }
-        }
-        Err(LexError::InvalidToken(char))
+        Ok(Token {
+            token_kind: ascii_token(char).ok_or(LexError::InvalidToken(char))?,
+            len: new_non_zero_usize::<1>(),
+        })
     }
 }
 
@@ -593,102 +582,105 @@ tokens! {
     While = "`while`",
 }
 
-pub const TOKEN_MAP: &[Option<TokenKind>] = &[
-    Some(TokenKind::Not),
-    None, // "
-    Some(TokenKind::Pound),
-    Some(TokenKind::Dollar),
-    Some(TokenKind::Percent),
-    Some(TokenKind::And),
-    None, // '
-    Some(TokenKind::LParen),
-    Some(TokenKind::RParen),
-    Some(TokenKind::Star),
-    Some(TokenKind::Plus),
-    Some(TokenKind::Comma),
-    Some(TokenKind::Minus),
-    Some(TokenKind::Dot),
-    Some(TokenKind::Slash),
-    None, // 0
-    None, // 1
-    None, // 2
-    None, // 3
-    None, // 4
-    None, // 5
-    None, // 6
-    None, // 7
-    None, // 8
-    None, // 9
-    Some(TokenKind::Colon),
-    Some(TokenKind::Semi),
-    Some(TokenKind::Lt),
-    Some(TokenKind::Eq),
-    Some(TokenKind::Gt),
-    Some(TokenKind::Question),
-    Some(TokenKind::At),
-    None, // A
-    None, // B
-    None, // C
-    None, // D
-    None, // E
-    None, // F
-    None, // G
-    None, // H
-    None, // I
-    None, // J
-    None, // K
-    None, // L
-    None, // M
-    None, // N
-    None, // O
-    None, // P
-    None, // Q
-    None, // R
-    None, // S
-    None, // T
-    None, // U
-    None, // V
-    None, // W
-    None, // X
-    None, // Y
-    None, // Z
-    Some(TokenKind::LBrack),
-    None, // \
-    Some(TokenKind::RBrack),
-    Some(TokenKind::Caret),
-    Some(TokenKind::Underscore),
-    None, // `
-    None, // A
-    None, // B
-    None, // C
-    None, // D
-    None, // E
-    None, // F
-    None, // G
-    None, // H
-    None, // I
-    None, // J
-    None, // K
-    None, // L
-    None, // M
-    None, // N
-    None, // O
-    None, // P
-    None, // Q
-    None, // R
-    None, // S
-    None, // T
-    None, // U
-    None, // V
-    None, // W
-    None, // X
-    None, // Y
-    None, // Z
-    Some(TokenKind::LCurly),
-    Some(TokenKind::Or),
-    Some(TokenKind::RCurly),
-    Some(TokenKind::Tilde),
-];
+fn ascii_token(char: char) -> Option<TokenKind> {
+    *[
+        Some(TokenKind::Not),
+        None, // "
+        Some(TokenKind::Pound),
+        Some(TokenKind::Dollar),
+        Some(TokenKind::Percent),
+        Some(TokenKind::And),
+        None, // '
+        Some(TokenKind::LParen),
+        Some(TokenKind::RParen),
+        Some(TokenKind::Star),
+        Some(TokenKind::Plus),
+        Some(TokenKind::Comma),
+        Some(TokenKind::Minus),
+        Some(TokenKind::Dot),
+        Some(TokenKind::Slash),
+        None, // 0
+        None, // 1
+        None, // 2
+        None, // 3
+        None, // 4
+        None, // 5
+        None, // 6
+        None, // 7
+        None, // 8
+        None, // 9
+        Some(TokenKind::Colon),
+        Some(TokenKind::Semi),
+        Some(TokenKind::Lt),
+        Some(TokenKind::Eq),
+        Some(TokenKind::Gt),
+        Some(TokenKind::Question),
+        Some(TokenKind::At),
+        None, // A
+        None, // B
+        None, // C
+        None, // D
+        None, // E
+        None, // F
+        None, // G
+        None, // H
+        None, // I
+        None, // J
+        None, // K
+        None, // L
+        None, // M
+        None, // N
+        None, // O
+        None, // P
+        None, // Q
+        None, // R
+        None, // S
+        None, // T
+        None, // U
+        None, // V
+        None, // W
+        None, // X
+        None, // Y
+        None, // Z
+        Some(TokenKind::LBrack),
+        None, // \
+        Some(TokenKind::RBrack),
+        Some(TokenKind::Caret),
+        Some(TokenKind::Underscore),
+        None, // `
+        None, // A
+        None, // B
+        None, // C
+        None, // D
+        None, // E
+        None, // F
+        None, // G
+        None, // H
+        None, // I
+        None, // J
+        None, // K
+        None, // L
+        None, // M
+        None, // N
+        None, // O
+        None, // P
+        None, // Q
+        None, // R
+        None, // S
+        None, // T
+        None, // U
+        None, // V
+        None, // W
+        None, // X
+        None, // Y
+        None, // Z
+        Some(TokenKind::LCurly),
+        Some(TokenKind::Or),
+        Some(TokenKind::RCurly),
+        Some(TokenKind::Tilde),
+    ]
+    .get(u8::try_from(char).ok()?.checked_sub(b'!')? as usize)?
+}
 
 #[cfg(test)]
 mod tests {
