@@ -1,31 +1,40 @@
 pub mod grammar;
+pub mod node_builder;
 pub mod parse_request;
 pub mod syntax_tree;
-pub mod syntax_tree_node_builder;
+mod token_stream_stack;
 
 use std::ops::Range;
 
 use anyhow::anyhow;
 
-use crate::compiler::parser::{
-    parse_request::ParseRequestStack, syntax_tree::Module,
-    syntax_tree_node_builder::NodeBuilderInput,
+use crate::compiler::{
+    lexer::LexerHints,
+    parser::{
+        node_builder::NodeBuilderInput,
+        parse_request::{BuildRequest, ParseRequestStack},
+        syntax_tree::Module,
+    },
 };
 
 use self::{
-    grammar::{Grammar, RecursiveRule, Rule, RuleRef},
-    parse_request::{
-        BuildRequest, BuildRequestPostAction, ParseMode, ParseRequest, Repeat, RepeatUntil, Revert,
-        RuleRequest,
-    },
-    syntax_tree::{EmptyToken, SyntaxTree},
-    syntax_tree_node_builder::{NodeBuilderElement, NodeBuilderError, NodeBuilderReader},
+    grammar::{Grammar, RecursiveRule, RuleRef},
+    node_builder::ProcessReaderResult,
+    parse_request::{GroupParseMode, MatchRequest, ParseMode, ParseRequest, RepeatUntil},
+    syntax_tree::SyntaxTree,
+    token_stream_stack::{TokenInfo, TokenStreamStack},
 };
 
 use super::{
     diagnostic::Diagnostic,
-    lexer::{self, LexError, Token, TokenKind, TokenStream},
+    lexer::{
+        self, ClosingToken, GrammarToken, GroupKind, GroupToken, LexError, OpeningToken, TokenKind,
+        TokenStream,
+    },
 };
+
+// TODO: Required mismatch does not cancel remaining node builder inputs.
+//       Do not push more nodes if node builder is required mismatch.
 
 pub struct ModuleParseResult {
     pub syntax_tree: SyntaxTree,
@@ -41,24 +50,21 @@ pub fn parse(code: &str) -> ModuleParseResult {
         syntax_tree: SyntaxTree::new(token_stream.skip_whitespace_tokens(code)),
         diagnostics: vec![],
         last_lex_error: None,
-        token_streams: vec![token_stream],
-        parse_requests: ParseRequestStack::new(grammar),
+        token_streams: TokenStreamStack::new(token_stream),
+        parse_requests: ParseRequestStack::new(),
         node_builder_input: NodeBuilderInput::new(),
     };
 
+    state.push_build_request(grammar, grammar.initial_rule(), ParseMode::Required);
+
+    // state.visualize(code, grammar);
+
     while let Some(request) = state.parse_requests.pop() {
-        state.process_parse_request(code, grammar, request);
+        state.dispatch_parse_request(code, grammar, request);
         // state.visualize(code, grammar);
     }
 
-    let token_stream = state
-        .token_streams
-        .pop()
-        .expect("token streams should not be empty after parsing");
-    assert!(state.token_streams.is_empty());
-    assert!(token_stream.is_at_end_of_code(code));
-
-    state.node_builder_input.final_check();
+    state.token_streams.validate(code);
 
     ModuleParseResult {
         syntax_tree: state.syntax_tree,
@@ -68,243 +74,65 @@ pub fn parse(code: &str) -> ModuleParseResult {
 
 #[derive(Debug)]
 struct ParseState {
+    /// The final output of the parser, slowly getting filled in during the parsing process.
     syntax_tree: SyntaxTree,
+    /// Diagnostics that were encountered during the parsing process.
     diagnostics: Vec<Diagnostic>,
+    /// Keeps track of the last encountered lexing error, so that errors that occur during
+    /// parsing of a previously already lexed sections can be avoided.
     last_lex_error: Option<usize>,
-    token_streams: Vec<TokenStream>,
+    /// A stack of token streams.
+    ///
+    /// Each build request pushes a new token stream onto the stack, so that it can easily be
+    /// reverted in case of mismatches or errors.
+    ///
+    /// To revert, the top token stream simply gets popped off the stack.
+    ///
+    /// To commit a successful build request, the second to top token stream is removed instead.
+    token_streams: TokenStreamStack,
+    /// A stack of pending parse requests.
+    ///
+    /// A single parsing step consists of popping the top request off the stack and processing it.
     parse_requests: ParseRequestStack,
+    /// A stack onto which tokens, nodes and also mismatches or errors are pushed.
+    ///
+    /// These elements are processed during build requests and get turned into nodes.
     node_builder_input: NodeBuilderInput,
 }
 
 impl ParseState {
-    fn token_stream(&self) -> TokenStream {
-        *self
-            .token_streams
-            .last()
-            .expect("token streams should not be empty")
-    }
-
-    fn token_stream_mut(&mut self) -> &mut TokenStream {
-        self.token_streams
-            .last_mut()
-            .expect("token streams should not be empty")
-    }
-
-    /// Processes a single parse request.
-    fn process_parse_request(&mut self, code: &str, grammar: &Grammar, request: ParseRequest) {
+    /// Dispatches a single parse request to different functions that then process the request.
+    fn dispatch_parse_request(&mut self, code: &str, grammar: &Grammar, request: ParseRequest) {
         match request {
-            ParseRequest::Rule(rule_request) => {
-                self.process_rule_request(code, grammar, rule_request)
-            }
             ParseRequest::Build(build_request) => {
-                self.process_build_request(code, grammar, build_request)
+                self.process_build_request(code, grammar, build_request);
             }
-        }
-    }
-
-    /// Parses a single token or pushes a build request on the stack.
-    fn process_rule_request(&mut self, code: &str, grammar: &Grammar, rule_request: RuleRequest) {
-        match rule_request.rule {
-            Rule::Token(token_kind) => {
-                self.parse_token(code, grammar, token_kind, rule_request.mode);
-            }
-            Rule::Ref(rule_ref) => {
-                self.push_build_request(grammar, rule_ref, rule_request.mode);
-            }
-        }
-    }
-
-    /// Pushes a build request with the given mode on the stack.
-    fn push_build_request(&mut self, grammar: &Grammar, rule_ref: RuleRef, mode: ParseMode) {
-        let request = ParseRequest::Build(BuildRequest {
-            rule_ref,
-            node_builder_stack: self.node_builder_input.push_stack(),
-            post_action: match mode {
-                ParseMode::Required => BuildRequestPostAction::TreatMissingAsError,
-                ParseMode::Optional => BuildRequestPostAction::Revert(Revert {
-                    token_stream_index: self.push_token_stream(),
-                    alternations_on_match: false,
-                    build_request_on_mismatch: false,
-                }),
-                ParseMode::Essential => BuildRequestPostAction::Revert(Revert {
-                    token_stream_index: self.push_token_stream(),
-                    alternations_on_match: false,
-                    build_request_on_mismatch: true,
-                }),
-                ParseMode::Repetition(repeat_until) => BuildRequestPostAction::Repeat(Repeat {
-                    token_stream_index: self.push_token_stream(),
-                    repeat_until,
-                }),
-                ParseMode::Alternation => BuildRequestPostAction::Revert(Revert {
-                    token_stream_index: self.push_token_stream(),
-                    alternations_on_match: true,
-                    build_request_on_mismatch: false,
-                }),
-            },
-        });
-        self.parse_requests.push(request);
-
-        match &grammar.rule(rule_ref).rule {
-            RecursiveRule::Concatenation {
-                essential,
-                last_essential,
-                required,
-            } => {
-                self.parse_requests
-                    .extend(required.iter().copied().rev().map(ParseRequest::required));
-                self.parse_requests.push(ParseRequest::Rule(RuleRequest {
-                    rule: *last_essential,
-                    mode: ParseMode::Essential,
-                }));
-                self.parse_requests
-                    .extend(essential.iter().copied().rev().map(ParseRequest::essential));
-            }
-            RecursiveRule::Alternation(rules) => {
-                self.parse_requests.extend(rules.iter().rev().map(|&rule| {
-                    ParseRequest::Rule(RuleRequest {
-                        rule,
-                        mode: ParseMode::Alternation,
-                    })
-                }))
-            }
-            RecursiveRule::Repetition(rule) => {
-                self.parse_requests.push(ParseRequest::Rule(RuleRequest {
-                    rule: *rule,
-                    mode: ParseMode::Repetition(RepeatUntil::Mismatch),
-                }))
-            }
-            RecursiveRule::GlobalRepetition(rule) => {
-                self.parse_requests.push(ParseRequest::Rule(RuleRequest {
-                    rule: *rule,
-                    mode: ParseMode::Repetition(RepeatUntil::EndOfTokenStream),
-                }))
-            }
-            RecursiveRule::BracedRepetition(brace_kind, rule) => {
-                self.parse_requests.push(ParseRequest::Rule(RuleRequest {
-                    rule: Rule::Token(brace_kind.closing_token()),
-                    mode: ParseMode::Required,
-                }));
-                self.parse_requests.push(ParseRequest::Rule(RuleRequest {
-                    rule: *rule,
-                    mode: ParseMode::Repetition(RepeatUntil::Token(brace_kind.closing_token())),
-                }));
-                self.parse_requests.push(ParseRequest::Rule(RuleRequest {
-                    rule: Rule::Token(brace_kind.opening_token()),
-                    mode: ParseMode::Essential,
-                }));
-            }
-        }
-    }
-
-    fn push_token_stream(&mut self) -> usize {
-        let token_stream_index = self.token_streams.len();
-        self.token_streams.push(self.token_stream());
-        token_stream_index
-    }
-
-    /// Parses a single token with the given mode.
-    fn parse_token(
-        &mut self,
-        code: &str,
-        grammar: &Grammar,
-        token_kind: TokenKind,
-        mode: ParseMode,
-    ) {
-        match (self.next_token(code), mode) {
-            (Some(token), _) if token.token_kind == token_kind => {
-                if let ParseMode::Alternation = mode {
-                    self.parse_requests.pop_remaining_alternations();
+            ParseRequest::Match(match_request) => match match_request {
+                MatchRequest::Token {
+                    token_kind,
+                    parse_mode,
+                } => {
+                    self.parse_token(code, token_kind, parse_mode);
                 }
-                self.repush_repetition_token(mode, token_kind);
-                self.advance_token_and_push(code, token);
-            }
-            (Some(token), ParseMode::Repetition(RepeatUntil::Token(until_token)))
-                if token.token_kind == until_token =>
-            {
-                self.node_builder_input.push(NodeBuilderElement::Empty)
-            }
-            (_, ParseMode::Optional) => {
-                self.node_builder_input
-                    .push(NodeBuilderElement::EmptyToken(EmptyToken {
-                        index: self.token_stream().index(),
-                    }))
-            }
-            (Some(_), ParseMode::Repetition(RepeatUntil::Mismatch))
-            | (None, ParseMode::Repetition(RepeatUntil::EndOfTokenStream))
-            | (_, ParseMode::Alternation | ParseMode::Repetition(RepeatUntil::Mismatch)) => {
-                self.node_builder_input.push(NodeBuilderElement::Empty)
-            }
-
-            (token, ParseMode::Essential) => {
-                self.revert_build_request_after_mismatch(code, grammar, token_kind.name(), token);
-            }
-
-            (Some(token), ParseMode::Required) => {
-                self.x_expected_found_y(token_kind.name(), token.token_kind.name());
-                self.node_builder_input.push(NodeBuilderElement::Error);
-            }
-            (Some(token), ParseMode::Repetition(RepeatUntil::Token(until_token))) => {
-                self.repush_repetition_token(mode, token_kind);
-
-                let TokenInfo { range, .. } = self.advance_token(code, token);
-                self.x_or_y_expected_found_z_at(
-                    token_kind.name(),
-                    until_token.name(),
-                    token.token_kind.name(),
-                    range,
-                );
-            }
-            (Some(token), ParseMode::Repetition(RepeatUntil::EndOfTokenStream)) => {
-                self.repush_repetition_token(mode, token_kind);
-
-                let TokenInfo { range, .. } = self.advance_token(code, token);
-                self.x_expected_found_y_at(token_kind.name(), token.token_kind.name(), range);
-            }
-
-            (None, ParseMode::Repetition(RepeatUntil::Token(until_token))) => {
-                self.x_or_y_expected(token_kind.name(), until_token.name());
-                self.node_builder_input.push(NodeBuilderElement::Empty);
-            }
-            (None, ParseMode::Required) => {
-                self.x_expected(token_kind.name());
-                self.node_builder_input.push(NodeBuilderElement::Error);
-            }
+                MatchRequest::Rule {
+                    rule_ref,
+                    parse_mode,
+                } => {
+                    self.push_build_request(grammar, rule_ref, parse_mode);
+                }
+                MatchRequest::Group {
+                    token_kind,
+                    parse_mode,
+                } => match token_kind {
+                    GroupToken::Opening(token_kind) => {
+                        self.process_opening_group_request(code, token_kind, parse_mode);
+                    }
+                    GroupToken::Closing(token_kind) => {
+                        self.process_closing_group_request(code, token_kind, parse_mode);
+                    }
+                },
+            },
         }
-    }
-
-    /// Pushes the same token parse request if the current parse mode is [`ParseMode::Repetition`].
-    fn repush_repetition_token(&mut self, mode: ParseMode, token_kind: TokenKind) {
-        if let ParseMode::Repetition(_) = mode {
-            self.parse_requests.push(ParseRequest::Rule(RuleRequest {
-                rule: Rule::Token(token_kind),
-                mode,
-            }))
-        }
-    }
-
-    /// Advances over a single token and trailing whitespace returning token index, token end index
-    /// and trailing whitespace.
-    fn advance_token(&mut self, code: &str, token: lexer::Token) -> TokenInfo {
-        let index = self.token_stream().index();
-        self.token_stream_mut().advance_token(token);
-        TokenInfo {
-            range: index..self.token_stream().index(),
-            trailing_whitespace: self.token_stream_mut().skip_whitespace_tokens(code),
-        }
-    }
-
-    /// Advances over a single token and whitespace and pushes it.
-    fn advance_token_and_push(&mut self, code: &str, token: lexer::Token) {
-        let TokenInfo {
-            range,
-            trailing_whitespace: trailing_whitespace_len,
-        } = self.advance_token(code, token);
-        self.node_builder_input
-            .push(NodeBuilderElement::Token(syntax_tree::Token {
-                token_len: token.len,
-                token_start: range.start,
-                trailing_whitespace_len,
-            }));
     }
 
     fn process_build_request(
@@ -313,184 +141,443 @@ impl ParseState {
         grammar: &Grammar,
         build_request: BuildRequest,
     ) {
-        let named_rule = grammar.rule(build_request.rule_ref);
-        let mut node_builder_reader = NodeBuilderReader::new(
-            &mut self.node_builder_input,
-            build_request.node_builder_stack,
+        let named_rule = grammar.rule(build_request.rule);
+
+        let result = self.node_builder_input.build(
+            &mut self.syntax_tree,
+            named_rule.builder,
+            build_request.parse_mode,
         );
-        let node_ref = named_rule.builder.0(&mut self.syntax_tree, &mut node_builder_reader);
-        let reader_empty = node_builder_reader.is_empty();
-        self.node_builder_input
-            .pop_stack(build_request.node_builder_stack);
 
-        match node_ref {
-            Ok(Some(node_ref)) => {
-                assert!(reader_empty);
-                self.node_builder_input
-                    .push(NodeBuilderElement::NodeRef(node_ref));
+        match result {
+            ProcessReaderResult::NodeBuilt => {
+                self.token_streams.commit();
 
-                match build_request.post_action {
-                    BuildRequestPostAction::TreatMissingAsError => {}
-                    BuildRequestPostAction::Repeat(repeat) => {
-                        self.commit_token_stream(repeat.token_stream_index);
-                        self.push_build_request(
-                            grammar,
-                            build_request.rule_ref,
-                            ParseMode::Repetition(repeat.repeat_until),
-                        );
-                    }
-                    BuildRequestPostAction::Revert(revert) => {
-                        self.commit_token_stream(revert.token_stream_index);
-                        if revert.alternations_on_match {
-                            self.parse_requests.pop_remaining_alternations();
-                        }
-                    }
-                }
-            }
-            Ok(None) => {
-                assert!(reader_empty);
-                match build_request.post_action {
-                    BuildRequestPostAction::TreatMissingAsError => {
-                        self.x_expected(named_rule.name);
-                        self.node_builder_input.push(NodeBuilderElement::Error);
-                    }
-                    BuildRequestPostAction::Repeat(repeat) => {
-                        self.revert_token_stream(repeat.token_stream_index);
-                        self.process_mismatched_repetition_build_request(
-                            code,
-                            grammar,
-                            repeat.repeat_until,
-                            named_rule.name,
-                            build_request.rule_ref,
-                        );
-                    }
-                    BuildRequestPostAction::Revert(revert) => {
-                        self.revert_token_stream(revert.token_stream_index);
-                        if revert.build_request_on_mismatch {
-                            let token = self.next_token(code);
-                            self.revert_build_request_after_mismatch(
-                                code,
-                                grammar,
-                                named_rule.name,
-                                token,
-                            );
+                match build_request.parse_mode {
+                    ParseMode::Essential => {}
+                    ParseMode::Required => {}
+                    ParseMode::Optional => {}
+                    ParseMode::Repetition { repeat_until } => {
+                        if self.token_streams.current().is_at_end_of_code(code) {
+                            self.node_builder_input
+                                .push_end_repetition(self.code_index());
                         } else {
-                            self.node_builder_input.push(NodeBuilderElement::Empty);
+                            self.push_build_request(
+                                grammar,
+                                build_request.rule,
+                                ParseMode::Repetition {
+                                    repeat_until: repeat_until.with_required(),
+                                },
+                            );
                         }
                     }
+                    ParseMode::Alternation => self.parse_requests.pop_remaining_match_requests(),
                 }
             }
-            Err(NodeBuilderError) => match build_request.post_action {
-                BuildRequestPostAction::TreatMissingAsError => {
-                    self.node_builder_input.push(NodeBuilderElement::Error);
-                }
-                BuildRequestPostAction::Repeat(repeat) => {
-                    self.commit_token_stream(repeat.token_stream_index);
-                    if let Some(token) = self.next_token(code) {
-                        match repeat.repeat_until {
-                            RepeatUntil::Mismatch | RepeatUntil::EndOfTokenStream => {
-                                let TokenInfo { range, .. } = self.advance_token(code, token);
-                                self.x_expected_found_y_at(
-                                    named_rule.name,
-                                    token.token_kind.name(),
-                                    range,
-                                );
+            ProcessReaderResult::NodeBuiltWithWarnings => {
+                self.token_streams.commit();
 
-                                self.push_build_request(
-                                    grammar,
-                                    build_request.rule_ref,
-                                    ParseMode::Repetition(repeat.repeat_until),
-                                );
-                            }
-                            RepeatUntil::Token(repeat_until_token) => {
-                                if repeat_until_token == token.token_kind {
-                                    self.node_builder_input.push(NodeBuilderElement::Empty)
-                                } else {
-                                    // TODO: Is it okay to always advance here?
-                                    let TokenInfo { range, .. } = self.advance_token(code, token);
-                                    self.x_or_y_expected_found_z_at(
-                                        named_rule.name,
-                                        repeat_until_token.name(),
-                                        token.token_kind.name(),
-                                        range,
-                                    );
-
-                                    self.push_build_request(
-                                        grammar,
-                                        build_request.rule_ref,
-                                        ParseMode::Repetition(repeat.repeat_until),
-                                    );
-                                }
-                            }
+                match build_request.parse_mode {
+                    ParseMode::Essential => {}
+                    ParseMode::Required => {}
+                    ParseMode::Optional => {}
+                    ParseMode::Repetition { repeat_until } => {
+                        if self.token_streams.current().is_at_end_of_code(code) {
+                            self.node_builder_input
+                                .push_end_repetition(self.code_index());
+                        } else {
+                            self.push_build_request(
+                                grammar,
+                                build_request.rule,
+                                ParseMode::Repetition {
+                                    repeat_until: repeat_until.with_required(),
+                                },
+                            );
                         }
-                    } else {
-                        self.node_builder_input.push(NodeBuilderElement::Empty)
                     }
+                    ParseMode::Alternation => self.parse_requests.pop_remaining_match_requests(),
                 }
-                BuildRequestPostAction::Revert(revert) => {
-                    self.commit_token_stream(revert.token_stream_index);
-                    self.node_builder_input.push(NodeBuilderElement::Error);
+            }
+            ProcessReaderResult::Mismatch => {
+                self.token_streams.revert();
+
+                match build_request.parse_mode {
+                    ParseMode::Essential => self.parse_requests.pop_remaining_match_requests(),
+                    ParseMode::Required => self.x_expected(named_rule.name),
+                    ParseMode::Optional => {}
+                    ParseMode::Repetition { repeat_until } => {
+                        if self.repetition_essential_mismatch(
+                            code,
+                            named_rule.name,
+                            repeat_until,
+                            None,
+                        ) {
+                            self.push_build_request(
+                                grammar,
+                                build_request.rule,
+                                ParseMode::Repetition {
+                                    repeat_until: repeat_until.with_required(),
+                                },
+                            )
+                        }
+                    }
+                    ParseMode::Alternation => {}
                 }
-            },
+            }
+            ProcessReaderResult::Error => {
+                self.token_streams.commit();
+
+                match build_request.parse_mode {
+                    ParseMode::Essential => {}
+                    ParseMode::Required => {}
+                    ParseMode::Optional => {}
+                    ParseMode::Repetition { repeat_until } => {
+                        if self.token_streams.current().is_at_end_of_code(code) {
+                            self.node_builder_input
+                                .push_end_repetition(self.code_index());
+                        } else {
+                            self.push_build_request(
+                                grammar,
+                                build_request.rule,
+                                ParseMode::Repetition {
+                                    repeat_until: repeat_until.with_required(),
+                                },
+                            );
+                        }
+                    }
+                    ParseMode::Alternation => self.parse_requests.pop_remaining_match_requests(),
+                }
+            }
         }
     }
 
-    fn commit_token_stream(&mut self, token_stream_index: usize) {
-        let last_token_stream = self.token_stream();
-        self.token_streams.drain(token_stream_index..);
-        *self.token_stream_mut() = last_token_stream;
+    /// Parses a single token with the given parse mode.
+    fn parse_token(&mut self, code: &str, token_kind: GrammarToken, parse_mode: ParseMode) {
+        match (parse_mode, self.next_token(code, false)) {
+            (parse_mode, Some(token)) if token.kind == token_kind.into() => {
+                self.advance_token_and_push(code, token);
+
+                if let ParseMode::Repetition { .. } = parse_mode {
+                    self.parse_requests.push(MatchRequest::Token {
+                        token_kind,
+                        parse_mode,
+                    })
+                }
+
+                if let ParseMode::Alternation = parse_mode {
+                    self.parse_requests.pop_remaining_match_requests();
+                }
+            }
+
+            (ParseMode::Essential, _) => {
+                self.node_builder_input.mismatch(None);
+                self.parse_requests.pop_remaining_match_requests();
+            }
+
+            (ParseMode::Required, _) => {
+                self.node_builder_input.error();
+
+                // self.skip_maybe_token(code, token_kind.name(), token);
+                self.x_expected(token_kind.name())
+            }
+
+            (ParseMode::Optional, _) => self
+                .node_builder_input
+                .push_optional_mismatch(self.code_index()),
+
+            (ParseMode::Repetition { repeat_until }, token) => {
+                if self.repetition_essential_mismatch(
+                    code,
+                    token_kind.name(),
+                    repeat_until,
+                    Some(token),
+                ) {
+                    self.parse_requests.push(MatchRequest::Token {
+                        token_kind,
+                        parse_mode,
+                    })
+                }
+            }
+
+            (ParseMode::Alternation, _) => self.node_builder_input.alternation_mismatch(),
+        }
     }
 
-    fn revert_token_stream(&mut self, token_stream_index: usize) {
-        self.token_streams.drain(token_stream_index..);
-    }
-
-    fn revert_build_request_after_mismatch(
+    fn repetition_essential_mismatch(
         &mut self,
         code: &str,
-        grammar: &Grammar,
-        rule_name: &str,
-        token: Option<Token>,
-    ) {
-        let mut next_build_request = Some(self.parse_requests.pop_build_request());
-        while let Some(build_request) = next_build_request.take() {
-            self.node_builder_input
-                .pop_stack(build_request.node_builder_stack);
-            match build_request.post_action {
-                BuildRequestPostAction::TreatMissingAsError => {
-                    if let Some(token) = token {
-                        self.x_expected_found_y(rule_name, token.token_kind.name());
+        expected: &str,
+        repeat_until: RepeatUntil,
+        next_token: Option<Option<lexer::Token>>,
+    ) -> bool {
+        match repeat_until {
+            RepeatUntil::Mismatch => {
+                self.node_builder_input
+                    .push_end_repetition(self.code_index());
+
+                false
+            }
+            RepeatUntil::ClosingGroup {
+                group_kind,
+                required,
+            } => {
+                if let Some(token) = next_token.unwrap_or_else(|| self.next_token(code, false)) {
+                    if token.kind == group_kind.closing_token().into() {
+                        self.node_builder_input
+                            .push_end_repetition(self.code_index());
+
+                        false
+                    } else if required {
+                        self.node_builder_input.repetition_error();
+                        self.skip_token(code, expected, token);
+
+                        true
+                    } else if let TokenKind::Group(group_token) = token.kind {
+                        if self.token_streams.contains_group(group_token.kind()) {
+                            self.node_builder_input
+                                .push_end_repetition(self.code_index());
+
+                            false
+                        } else {
+                            self.node_builder_input.repetition_error();
+                            self.skip_token(code, expected, token);
+
+                            true
+                        }
                     } else {
-                        self.x_expected(rule_name);
+                        if self.node_builder_input.mismatch(Some(self.code_index())) {
+                            self.parse_requests.pop_remaining_match_requests();
+                        }
+
+                        false
                     }
-                    self.node_builder_input.push(NodeBuilderElement::Empty);
+                } else {
+                    self.node_builder_input
+                        .push_end_repetition(self.code_index());
+
+                    false
                 }
-                BuildRequestPostAction::Repeat(repeat) => {
-                    self.revert_token_stream(repeat.token_stream_index);
-                    self.process_mismatched_repetition_build_request(
-                        code,
-                        grammar,
-                        repeat.repeat_until,
-                        rule_name,
-                        build_request.rule_ref,
-                    );
-                }
-                BuildRequestPostAction::Revert(revert) => {
-                    self.revert_token_stream(revert.token_stream_index);
-                    if revert.build_request_on_mismatch {
-                        next_build_request = Some(self.parse_requests.pop_build_request());
-                    } else {
-                        self.node_builder_input.push(NodeBuilderElement::Empty);
-                    }
+            }
+            RepeatUntil::Eof => {
+                if let Some(token) = self.next_token(code, false) {
+                    self.node_builder_input.repetition_error();
+                    self.skip_token(code, expected, token);
+
+                    true
+                } else {
+                    self.node_builder_input
+                        .push_end_repetition(self.code_index());
+
+                    false
                 }
             }
         }
+    }
+
+    /// Skips the given token and reports an error.
+    fn skip_token(&mut self, code: &str, expected: &str, token: lexer::Token) {
+        if let TokenKind::Group(GroupToken::Opening(_)) = token.kind {
+            let start = self.code_index();
+
+            let initial_depth = self.token_streams.group_depth();
+            self.token_streams.advance_token(code, token);
+
+            let mut end = self.code_index();
+
+            while let Some(token) = self.next_token(code, false) {
+                if let TokenKind::Group(GroupToken::Closing(group_token)) = token.kind {
+                    if self
+                        .token_streams
+                        .contains_group_before_but_not_after(group_token.kind(), initial_depth)
+                    {
+                        break;
+                    }
+                }
+
+                if self.token_streams.group_depth() <= initial_depth {
+                    break;
+                }
+
+                end = self.token_streams.advance_token(code, token).range.end;
+            }
+
+            self.x_expected_at(expected, start..end);
+        } else {
+            let start = self.code_index();
+            let end = start + token.len.get();
+            self.x_expected_found_y_at(expected, token.kind.name(), start..end);
+            self.token_streams.advance_token(code, token);
+        }
+    }
+
+    /// Pushes a build request for the given rule and with the given parse mode on the stack.
+    fn push_build_request(&mut self, grammar: &Grammar, rule_ref: RuleRef, parse_mode: ParseMode) {
+        self.token_streams.push();
+
+        self.parse_requests.push(ParseRequest::Build(BuildRequest {
+            rule: rule_ref,
+            parse_mode,
+        }));
+
+        match &grammar.rule(rule_ref).rule {
+            RecursiveRule::Concatenation {
+                essential,
+                last_essential,
+                required,
+            } => {
+                self.parse_requests.extend(required.iter().rev());
+                self.parse_requests.extend([last_essential]);
+                self.parse_requests.extend(essential.iter().rev());
+
+                self.node_builder_input
+                    .push_concatenation(self.code_index());
+            }
+            RecursiveRule::Alternation { variants } => {
+                self.parse_requests.extend(variants.iter().rev());
+
+                self.node_builder_input
+                    .push_alternation(self.code_index(), variants.len());
+            }
+        }
+    }
+
+    /// Processes a group request, pushing a new group on the group stack.
+    fn process_opening_group_request(
+        &mut self,
+        code: &str,
+        token_kind: OpeningToken,
+        parse_mode: GroupParseMode,
+    ) {
+        match (
+            parse_mode,
+            self.next_token(code, token_kind == OpeningToken::Angle),
+        ) {
+            (_, Some(token)) if token.kind == TokenKind::Group(token_kind.into()) => {
+                self.advance_token_and_push(code, token);
+            }
+
+            (GroupParseMode::Essential, _) => {
+                self.node_builder_input.mismatch(None);
+                self.parse_requests.pop_remaining_match_requests();
+            }
+
+            (GroupParseMode::Required, _) => {
+                self.x_expected(token_kind.kind().name());
+                self.node_builder_input.error();
+
+                let code_index = self.code_index();
+                let node_builder_input = &mut self.node_builder_input;
+                self.parse_requests
+                    .pop_group(token_kind.kind(), |parse_mode| match parse_mode {
+                        ParseMode::Essential => node_builder_input.error(),
+                        ParseMode::Required => node_builder_input.error(),
+                        ParseMode::Optional => {
+                            node_builder_input.mismatch(None);
+                        }
+                        ParseMode::Repetition { .. } => {
+                            node_builder_input.push_end_repetition(code_index)
+                        }
+                        ParseMode::Alternation => panic!("unexpected alternation"),
+                    });
+
+                self.node_builder_input.error();
+            }
+        }
+    }
+
+    fn process_closing_group_request(
+        &mut self,
+        code: &str,
+        token_kind: ClosingToken,
+        parse_mode: GroupParseMode,
+    ) {
+        match (parse_mode, self.next_token(code, false)) {
+            (_, Some(token)) if token.kind == TokenKind::Group(token_kind.into()) => {
+                self.advance_token_and_push(code, token)
+            }
+
+            (GroupParseMode::Essential, _) => {
+                self.node_builder_input.mismatch(None);
+                self.parse_requests.pop_remaining_match_requests();
+            }
+
+            (GroupParseMode::Required, Some(token)) => {
+                let start = self.code_index();
+
+                let initial_depth = self.token_streams.group_depth();
+                self.token_streams.advance_token(code, token);
+
+                let mut end = self.code_index();
+                let mut closing_group = false;
+
+                while let Some(token) = self.next_token(code, false) {
+                    if let TokenKind::Group(GroupToken::Closing(group_token)) = token.kind {
+                        if self.token_streams.contains_group_before_but_not_after(
+                            group_token.kind(),
+                            initial_depth - 1,
+                        ) {
+                            break;
+                        }
+                    }
+
+                    let TokenInfo {
+                        range,
+                        trailing_whitespace_len,
+                    } = self.token_streams.advance_token(code, token);
+
+                    if self.token_streams.group_depth() < initial_depth {
+                        self.node_builder_input.push_token(syntax_tree::Token {
+                            len: token.len,
+                            code_index: range.start,
+                            trailing_whitespace_len,
+                        });
+                        closing_group = true;
+                        break;
+                    }
+
+                    end = range.end;
+                }
+
+                if closing_group {
+                    self.error_at(anyhow!("unexpected trailing data"), start..end);
+                } else {
+                    self.x_expected_at(token_kind.name(), start..end);
+                    self.node_builder_input.error();
+                }
+            }
+            (GroupParseMode::Required, None) => {
+                self.x_expected(token_kind.name());
+                self.node_builder_input.error();
+            }
+        }
+    }
+
+    /// Advances the current token stream over the given token (including trailing whitespace) and
+    /// pushes it onto the node builder.
+    fn advance_token_and_push(&mut self, code: &str, token: lexer::Token) {
+        let TokenInfo {
+            range,
+            trailing_whitespace_len,
+        } = self.token_streams.advance_token(code, token);
+        self.node_builder_input.push_token(syntax_tree::Token {
+            len: token.len,
+            code_index: range.start,
+            trailing_whitespace_len,
+        });
     }
 
     /// Returns the next token of the token stream, processing all lex errors that may occur.
-    fn next_token(&mut self, code: &str) -> Option<lexer::Token> {
+    fn next_token(
+        &mut self,
+        code: &str,
+        expecting_opening_angle_bracket: bool,
+    ) -> Option<lexer::Token> {
         loop {
-            match self.token_stream().peek(code) {
+            match self
+                .token_streams
+                .current()
+                .peek(code, self.lexer_hints(expecting_opening_angle_bracket))
+            {
                 Ok(next_token) => break next_token,
                 Err(error) => self.process_lex_error(code, error),
             }
@@ -501,9 +588,7 @@ impl ParseState {
     ///
     /// In case of backtracking, only the first instance of the error is added as diagnostic.
     fn process_lex_error(&mut self, code: &str, error: LexError) {
-        let index = self.token_stream().index();
-        let end = index + self.token_stream_mut().advance_error(code, &error).get();
-        self.token_stream_mut().skip_whitespace_tokens(code);
+        let (index, end) = self.token_streams.advance_error(code, &error);
 
         if self
             .last_lex_error
@@ -514,92 +599,16 @@ impl ParseState {
         }
     }
 
-    #[allow(dead_code)]
-    fn visualize(&self, code: &str, grammar: &Grammar) {
-        self.node_builder_input.visualize(code);
-
-        print!("TokenStream at {}", self.token_stream().index());
-
-        for parse_request in &self.parse_requests.0 {
-            match parse_request {
-                ParseRequest::Rule(rule) => {
-                    let name = match rule.rule {
-                        Rule::Token(token) => token.name(),
-                        Rule::Ref(rule_ref) => grammar.rule(rule_ref).name,
-                    };
-
-                    print!(" {name}");
-                }
-                ParseRequest::Build(build) => {
-                    let name = grammar.rule(build.rule_ref).name;
-                    print!("\n- {name}:")
-                }
-            }
-        }
-        println!();
-
-        for diagnostic in &self.diagnostics {
-            println!("⚠ {}", diagnostic.error);
-        }
-        println!();
-    }
-
-    fn process_mismatched_repetition_build_request(
-        &mut self,
-        code: &str,
-        grammar: &Grammar,
-        repeat_until: RepeatUntil,
-        rule_name: &str,
-        rule_ref: RuleRef,
-    ) {
-        match repeat_until {
-            RepeatUntil::Mismatch => {
-                self.node_builder_input.push(NodeBuilderElement::Empty);
-            }
-            RepeatUntil::Token(repeat_until_token) => {
-                if let Some(token) = self.next_token(code) {
-                    if token.token_kind == repeat_until_token {
-                        self.node_builder_input.push(NodeBuilderElement::Empty);
-                    } else {
-                        let TokenInfo { range, .. } = self.advance_token(code, token);
-                        self.x_or_y_expected_found_z_at(
-                            rule_name,
-                            repeat_until_token.name(),
-                            token.token_kind.name(),
-                            range,
-                        );
-
-                        self.push_build_request(
-                            grammar,
-                            rule_ref,
-                            ParseMode::Repetition(RepeatUntil::Token(repeat_until_token)),
-                        );
-                    }
-                } else {
-                    self.x_or_y_expected(rule_name, repeat_until_token.name());
-                    self.node_builder_input.push(NodeBuilderElement::Empty);
-                }
-            }
-            RepeatUntil::EndOfTokenStream => {
-                if let Some(token) = self.next_token(code) {
-                    let TokenInfo { range, .. } = self.advance_token(code, token);
-                    self.x_expected_found_y_at(rule_name, token.token_kind.name(), range);
-
-                    self.push_build_request(
-                        grammar,
-                        rule_ref,
-                        ParseMode::Repetition(RepeatUntil::EndOfTokenStream),
-                    );
-                } else {
-                    self.node_builder_input.push(NodeBuilderElement::Empty);
-                }
-            }
+    fn lexer_hints(&self, expecting_opening_angle_bracket: bool) -> LexerHints {
+        LexerHints {
+            prefer_angle_brackets: expecting_opening_angle_bracket
+                || self.token_streams.current_group_kind() == Some(GroupKind::Angle),
         }
     }
 
     fn error(&mut self, error: anyhow::Error) {
         self.diagnostics
-            .push(Diagnostic::error(error, self.token_stream().index()));
+            .push(Diagnostic::error(error, self.code_index()));
     }
 
     fn error_at(&mut self, error: anyhow::Error, range: Range<usize>) {
@@ -610,6 +619,10 @@ impl ParseState {
         self.error(anyhow!("{x} expected"));
     }
 
+    fn x_expected_at(&mut self, x: &str, range: Range<usize>) {
+        self.error_at(anyhow!("{x} expected"), range);
+    }
+
     fn x_expected_found_y(&mut self, x: &str, y: &str) {
         self.error(anyhow!("{x} expected, found {y}"));
     }
@@ -617,20 +630,33 @@ impl ParseState {
     fn x_expected_found_y_at(&mut self, x: &str, y: &str, range: Range<usize>) {
         self.error_at(anyhow!("{x} expected, found {y}"), range);
     }
+
     fn x_or_y_expected(&mut self, x: &str, y: &str) {
         self.error(anyhow!("{x} or {y} expected"));
     }
 
-    // fn x_or_y_expected_found_z(&mut self, x: &str, y: &str, z: &str) {
-    //     self.error(anyhow!("{x} or {y} expected, found {z}"));
-    // }
+    fn x_or_y_expected_found_z(&mut self, x: &str, y: &str, z: &str) {
+        self.error(anyhow!("{x} or {y} expected, found {z}"));
+    }
 
     fn x_or_y_expected_found_z_at(&mut self, x: &str, y: &str, z: &str, range: Range<usize>) {
         self.error_at(anyhow!("{x} or {y} expected, found {z}"), range);
     }
-}
 
-struct TokenInfo {
-    range: Range<usize>,
-    trailing_whitespace: usize,
+    fn code_index(&self) -> usize {
+        self.token_streams.current().code_index()
+    }
+
+    #[allow(dead_code)]
+    fn visualize(&self, code: &str, grammar: &Grammar) {
+        self.token_streams.visualize();
+        self.node_builder_input.visualize(code);
+        self.parse_requests.visualize(grammar);
+        println!();
+
+        for diagnostic in &self.diagnostics {
+            println!("⚠ {}", diagnostic.error);
+        }
+        println!();
+    }
 }

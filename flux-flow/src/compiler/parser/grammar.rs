@@ -1,8 +1,10 @@
 use std::any::{Any, TypeId};
 
-use crate::compiler::lexer::{BraceKind, TokenKind};
+use derive_more::From;
 
-use super::syntax_tree_node_builder::{Buildable, NodeBuilder};
+use crate::compiler::lexer::{GrammarToken, GroupKind};
+
+use super::node_builder::{Buildable, NodeBuilder};
 
 /// A grammar that defines parsing rules for a language, somewhat similar to what an EBNF is.
 ///
@@ -10,7 +12,7 @@ use super::syntax_tree_node_builder::{Buildable, NodeBuilder};
 #[derive(Debug)]
 pub struct Grammar {
     initial_rule: RuleRef,
-    rules: Vec<NamedRule>,
+    rules: Box<[NamedRule]>,
 }
 
 /// Used to build up a [Grammar].
@@ -30,38 +32,74 @@ pub struct NamedRule {
 }
 
 /// A parsing rule that recursively references other rules.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, From)]
 pub enum RecursiveRule {
     /// Parses all given rules in order.
     ///
     /// 1. `essential`: Essential rules do not cause an immediate hard error.
-    /// 2. `last_essential`: At least one essential rule must exist.
+    /// 2. `last_essential`: One essential rule must exist; all remaining rules are required.
     /// 3. `required`: Required rules cause an immediate hard error.
     Concatenation {
-        essential: Vec<OptionalRule>,
-        last_essential: Rule,
-        required: Vec<OptionalRule>,
+        essential: Box<[EssentialRule]>,
+        // TODO: Ensure that this can never be optional or repetition through the type system.
+        //       But GlobalRepetition is allowed, but only if it only makes sense if it isn't
+        //       followed by anything.
+        last_essential: EssentialRule,
+        required: Box<[RequiredRule]>,
     },
     /// Tries to parse the given rules in order until one matches.
-    Alternation(Vec<Rule>),
-    /// Repeatedly parses the given rule until it no longer matches.
-    Repetition(Rule),
-    /// Special case of a repetition, that consumes the entire token stream.
-    GlobalRepetition(Rule),
-    BracedRepetition(BraceKind, Rule),
+    Alternation { variants: Box<[AlternationRule]> },
 }
 
-/// A [Rule] that might be either optional or required.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OptionalRule {
-    Optional(Rule),
-    Required(Rule),
+pub struct EssentialRule {
+    pub group_rule: GroupRule,
+    pub parse_mode: EssentialRuleMode,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EssentialRuleMode {
+    Essential,
+    Optional,
+    Repetition,
+    GlobalRepetition,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RequiredRule {
+    pub group_rule: GroupRule,
+    pub parse_mode: RequiredRuleMode,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequiredRuleMode {
+    Required,
+    Optional,
+    Repetition,
+    GlobalRepetition,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AlternationRule {
+    pub rule: Rule,
+}
+
+/// A [Rule] that can optionally be wrapped in group tokens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupRule {
+    pub rule: Rule,
+    pub group: Option<GroupKind>,
 }
 
 /// A parsing rule that either parses a single token or references a [NamedRule] in a [Grammar].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rule {
-    Token(TokenKind),
+    /// A single token.
+    ///
+    /// Group tokens are not allowed. [GroupRule] must be used instead. This ensures group tokens
+    /// always come in pairs which allows for better error messages when parsing invalid code.
+    Token(GrammarToken),
+    /// A reference to another [NamedRule].
     Ref(RuleRef),
 }
 
@@ -95,29 +133,28 @@ impl Grammar {
 }
 
 impl GrammarBuilder {
-    /// Returns a [RuleRef] for the given [Buildable], creating it if it doesn't exist yet.
+    /// Returns a [RuleRef] for the given [ConcatenationBuildable], creating it if it doesn't exist yet.
     ///
     /// This also recursively creates all referenced rules.
     /// Circular references are perfectly fine. The [GrammarBuilder]'s rules are simply [None].
     pub fn rule<T: Buildable + Any>(&mut self) -> RuleRef {
-        if let Some(i) = self
-            .rules
+        self.rules
             .iter()
             .enumerate()
-            .find_map(|(i, (type_id, _))| (*type_id == TypeId::of::<T>()).then_some(i))
-        {
-            RuleRef(i)
-        } else {
-            let i = self.rules.len();
-            self.rules.push((TypeId::of::<T>(), None));
-            let rule = T::rule(self);
-            let (_, named_rule) = &mut self.rules[i];
-            *named_rule = Some(NamedRule {
-                name: T::name(),
-                rule,
-                builder: NodeBuilder(T::build),
-            });
-            RuleRef(i)
-        }
+            .find_map(|(index, (type_id, _))| {
+                (*type_id == TypeId::of::<T>()).then_some(RuleRef(index))
+            })
+            .unwrap_or_else(|| {
+                let index = self.rules.len();
+                self.rules.push((TypeId::of::<T>(), None));
+                let rule = T::rule(self);
+                let (_, named_rule) = &mut self.rules[index];
+                *named_rule = Some(NamedRule {
+                    name: T::name(),
+                    rule,
+                    builder: NodeBuilder(T::build),
+                });
+                RuleRef(index)
+            })
     }
 }

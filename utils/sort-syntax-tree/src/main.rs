@@ -25,7 +25,12 @@ fn main() {
         .split(|&line| line.is_empty())
         .collect::<Vec<_>>();
 
-    syntax_tree_nodes.sort_unstable();
+    syntax_tree_nodes.sort_unstable_by_key(|group| {
+        group
+            .iter()
+            .find(|line| !line.starts_with("///"))
+            .map(|line| line.trim_start_matches(char::is_alphabetic).trim_start())
+    });
 
     let output = file
         .lines()
