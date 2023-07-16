@@ -73,29 +73,74 @@ pub trait NodeIterator<T> {
     fn iter_mut(&mut self) -> slice::IterMut<T>;
 }
 
+pub struct CodeSpanEnd {
+    pub index: usize,
+    pub index_with_trailing_whitespace: usize,
+}
+
 pub trait CodeSpan {
-    fn span(&self, syntax_tree: &SyntaxTree) -> Range<usize>;
-    fn span_with_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize>;
-    fn span_only_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize>;
-}
+    /// Return the index of the first token or a [`CodeSpan`] to recurse into.
+    ///
+    /// Usually you just want to call [`CodeSpan::span_start()`] which automatically does the
+    /// recursion for you in a tail-call optimized manner to avoid a stack overflow.
+    fn recurse_span_start<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<usize, &'a dyn CodeSpan>;
 
-pub trait CodeSpanWithoutSyntaxTree {
-    fn span(&self) -> Range<usize>;
-    fn span_with_trailing_whitespace(&self) -> Range<usize>;
-    fn span_only_trailing_whitespace(&self) -> Range<usize>;
-}
+    /// Returns the end index of the last token or a [`CodeSpan`] to recurse into.
+    ///
+    /// Usually you just want to call [`CodeSpan::span_end()`] which automatically does the
+    /// recursion for you in a tail-call optimized manner to avoid a stack overflow.
+    fn recurse_span_end<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<CodeSpanEnd, &'a dyn CodeSpan>;
 
-impl<T: CodeSpanWithoutSyntaxTree> CodeSpan for T {
-    fn span(&self, _: &SyntaxTree) -> Range<usize> {
-        self.span()
+    /// Recurses into [`CodeSpan::recurse_span_start()`] to get the index of the first token.
+    ///
+    /// Uses manually implemented tail-call recursion to avoid stack overflow.
+    fn span_start(&self, syntax_tree: &SyntaxTree) -> usize
+    where
+        Self: Sized,
+    {
+        let mut current: &dyn CodeSpan = self;
+        loop {
+            match current.recurse_span_start(syntax_tree) {
+                Ok(index) => break index,
+                Err(span) => current = span,
+            }
+        }
     }
 
-    fn span_with_trailing_whitespace(&self, _: &SyntaxTree) -> Range<usize> {
-        self.span_with_trailing_whitespace()
+    /// Recurses into [`CodeSpan::recurse_span_end()`] to get the end index of the last token.
+    ///
+    /// Uses manually implemented tail-call recursion to avoid stack overflow.
+    fn span_end(&self, syntax_tree: &SyntaxTree) -> CodeSpanEnd
+    where
+        Self: Sized,
+    {
+        let mut current: &dyn CodeSpan = self;
+        loop {
+            match current.recurse_span_end(syntax_tree) {
+                Ok(indices) => break indices,
+                Err(span) => current = span,
+            }
+        }
     }
 
-    fn span_only_trailing_whitespace(&self, _: &SyntaxTree) -> Range<usize> {
-        self.span_only_trailing_whitespace()
+    fn span(&self, syntax_tree: &SyntaxTree) -> Range<usize>
+    where
+        Self: Sized,
+    {
+        self.span_start(syntax_tree)..self.span_end(syntax_tree).index
+    }
+
+    fn span_with_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize>
+    where
+        Self: Sized,
+    {
+        self.span_start(syntax_tree)..self.span_end(syntax_tree).index_with_trailing_whitespace
     }
 }
 
@@ -106,18 +151,23 @@ pub struct Token {
     pub trailing_whitespace_len: usize,
 }
 
-impl CodeSpanWithoutSyntaxTree for Token {
-    fn span(&self) -> Range<usize> {
-        self.code_index..(self.code_index + self.len.get())
+impl Token {
+    pub fn token_span(self) -> Range<usize> {
+        self.code_index..self.code_index + self.len.get()
+    }
+}
+
+impl CodeSpan for Token {
+    fn recurse_span_start<'a>(&self, _: &'a SyntaxTree) -> Result<usize, &'a dyn CodeSpan> {
+        Ok(self.code_index)
     }
 
-    fn span_with_trailing_whitespace(&self) -> Range<usize> {
-        self.code_index..(self.code_index + self.len.get() + self.trailing_whitespace_len)
-    }
-
-    fn span_only_trailing_whitespace(&self) -> Range<usize> {
-        let code_index = self.code_index + self.len.get();
-        code_index..(code_index + self.trailing_whitespace_len)
+    fn recurse_span_end<'a>(&self, _: &'a SyntaxTree) -> Result<CodeSpanEnd, &'a dyn CodeSpan> {
+        let index = self.code_index + self.len.get();
+        Ok(CodeSpanEnd {
+            index,
+            index_with_trailing_whitespace: index + self.trailing_whitespace_len,
+        })
     }
 }
 
@@ -133,11 +183,11 @@ impl NodeBuilderReadable for Token {
 }
 
 impl Visualize for Token {
-    fn visualize(&self, _syntax_tree: &SyntaxTree, code: &str, indent: usize, with_indent: bool) {
+    fn visualize(&self, syntax_tree: &SyntaxTree, code: &str, indent: usize, with_indent: bool) {
         println!(
             "{: <2$}`{}`",
             "",
-            &code[CodeSpanWithoutSyntaxTree::span(self)],
+            &code[self.span(syntax_tree)],
             if with_indent { indent } else { 0 }
         );
     }
@@ -149,29 +199,27 @@ pub enum OptionalToken {
     None { code_index: usize },
 }
 
-impl CodeSpanWithoutSyntaxTree for OptionalToken {
-    fn span(&self) -> Range<usize> {
+impl CodeSpan for OptionalToken {
+    fn recurse_span_start<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<usize, &'a dyn CodeSpan> {
         match self {
-            OptionalToken::Some(token) => CodeSpanWithoutSyntaxTree::span(token),
-            OptionalToken::None { code_index } => *code_index..*code_index,
+            OptionalToken::Some(token) => token.recurse_span_start(syntax_tree),
+            OptionalToken::None { code_index } => Ok(*code_index),
         }
     }
 
-    fn span_with_trailing_whitespace(&self) -> Range<usize> {
+    fn recurse_span_end<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<CodeSpanEnd, &'a dyn CodeSpan> {
         match self {
-            OptionalToken::Some(token) => {
-                CodeSpanWithoutSyntaxTree::span_with_trailing_whitespace(token)
-            }
-            OptionalToken::None { code_index } => *code_index..*code_index,
-        }
-    }
-
-    fn span_only_trailing_whitespace(&self) -> Range<usize> {
-        match self {
-            OptionalToken::Some(token) => {
-                CodeSpanWithoutSyntaxTree::span_only_trailing_whitespace(token)
-            }
-            OptionalToken::None { code_index } => *code_index..*code_index,
+            OptionalToken::Some(token) => token.recurse_span_end(syntax_tree),
+            OptionalToken::None { code_index } => Ok(CodeSpanEnd {
+                index: *code_index,
+                index_with_trailing_whitespace: *code_index,
+            }),
         }
     }
 }
@@ -205,49 +253,33 @@ pub enum RepeatingToken {
     None { code_index: usize },
 }
 
-impl CodeSpanWithoutSyntaxTree for RepeatingToken {
-    fn span(&self) -> Range<usize> {
+impl CodeSpan for RepeatingToken {
+    fn recurse_span_start<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<usize, &'a dyn CodeSpan> {
         match self {
-            RepeatingToken::Some(tokens) => {
-                let start = CodeSpanWithoutSyntaxTree::span(
-                    tokens.first().expect("tokens should not be empty"),
-                )
-                .start;
-                let end = CodeSpanWithoutSyntaxTree::span(
-                    tokens.last().expect("tokens should not be empty"),
-                )
-                .end;
-                start..end
-            }
-            RepeatingToken::None { code_index } => *code_index..*code_index,
+            RepeatingToken::Some(tokens) => tokens
+                .first()
+                .expect("repeating token should have at least one token")
+                .recurse_span_start(syntax_tree),
+            RepeatingToken::None { code_index } => Ok(*code_index),
         }
     }
 
-    fn span_with_trailing_whitespace(&self) -> Range<usize> {
+    fn recurse_span_end<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<CodeSpanEnd, &'a dyn CodeSpan> {
         match self {
-            RepeatingToken::Some(tokens) => {
-                let start = CodeSpanWithoutSyntaxTree::span(
-                    tokens.first().expect("tokens should not be empty"),
-                )
-                .start;
-                let end = CodeSpanWithoutSyntaxTree::span_with_trailing_whitespace(
-                    tokens.last().expect("tokens should not be empty"),
-                )
-                .end;
-                start..end
-            }
-            RepeatingToken::None { code_index } => *code_index..*code_index,
-        }
-    }
-
-    fn span_only_trailing_whitespace(&self) -> Range<usize> {
-        match self {
-            RepeatingToken::Some(tokens) => {
-                CodeSpanWithoutSyntaxTree::span_only_trailing_whitespace(
-                    tokens.last().expect("tokens should not be empty"),
-                )
-            }
-            RepeatingToken::None { code_index } => *code_index..*code_index,
+            RepeatingToken::Some(tokens) => tokens
+                .last()
+                .expect("repeating token should have at least one token")
+                .recurse_span_end(syntax_tree),
+            RepeatingToken::None { code_index } => Ok(CodeSpanEnd {
+                index: *code_index,
+                index_with_trailing_whitespace: *code_index,
+            }),
         }
     }
 }
@@ -322,18 +354,20 @@ impl<T> NodeRef<T> {
 impl<T> CodeSpan for NodeRef<T>
 where
     SyntaxTree: Index<NodeRef<T>>,
-    <SyntaxTree as Index<NodeRef<T>>>::Output: CodeSpan,
+    for<'a> <SyntaxTree as Index<NodeRef<T>>>::Output: CodeSpan + Sized + 'a,
 {
-    fn span(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
-        syntax_tree[*self].span(syntax_tree)
+    fn recurse_span_start<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<usize, &'a dyn CodeSpan> {
+        Err(&syntax_tree[*self])
     }
 
-    fn span_with_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
-        syntax_tree[*self].span_with_trailing_whitespace(syntax_tree)
-    }
-
-    fn span_only_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
-        syntax_tree[*self].span_only_trailing_whitespace(syntax_tree)
+    fn recurse_span_end<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<CodeSpanEnd, &'a dyn CodeSpan> {
+        Err(&syntax_tree[*self])
     }
 }
 
@@ -404,24 +438,26 @@ impl<T> CodeSpan for OptionalNodeRef<T>
 where
     NodeRef<T>: CodeSpan,
 {
-    fn span(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
+    fn recurse_span_start<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<usize, &'a dyn CodeSpan> {
         match self {
-            Self::Some(node) => node.span(syntax_tree),
-            Self::None { code_index } => *code_index..*code_index,
+            OptionalNodeRef::Some(node) => node.recurse_span_start(syntax_tree),
+            OptionalNodeRef::None { code_index } => Ok(*code_index),
         }
     }
 
-    fn span_with_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
+    fn recurse_span_end<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<CodeSpanEnd, &'a dyn CodeSpan> {
         match self {
-            Self::Some(node) => node.span_with_trailing_whitespace(syntax_tree),
-            Self::None { code_index } => *code_index..*code_index,
-        }
-    }
-
-    fn span_only_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
-        match self {
-            Self::Some(node) => node.span_only_trailing_whitespace(syntax_tree),
-            Self::None { code_index } => *code_index..*code_index,
+            OptionalNodeRef::Some(node) => node.recurse_span_end(syntax_tree),
+            OptionalNodeRef::None { code_index } => Ok(CodeSpanEnd {
+                index: *code_index,
+                index_with_trailing_whitespace: *code_index,
+            }),
         }
     }
 }
@@ -501,51 +537,32 @@ impl<T> CodeSpan for RepeatingNodeRef<T>
 where
     NodeRef<T>: CodeSpan,
 {
-    fn span(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
+    fn recurse_span_start<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<usize, &'a dyn CodeSpan> {
         match self {
-            RepeatingNodeRef::Some(nodes) => {
-                let start = nodes
-                    .first()
-                    .expect("nodes should not be empty")
-                    .span(syntax_tree)
-                    .start;
-                let end = nodes
-                    .last()
-                    .expect("nodes should not be empty")
-                    .span(syntax_tree)
-                    .end;
-                start..end
-            }
-            RepeatingNodeRef::None { code_index } => *code_index..*code_index,
+            RepeatingNodeRef::Some(nodes) => nodes
+                .first()
+                .expect("repeating node should have at least one node")
+                .recurse_span_start(syntax_tree),
+            RepeatingNodeRef::None { code_index } => Ok(*code_index),
         }
     }
 
-    fn span_with_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
-        match self {
-            RepeatingNodeRef::Some(nodes) => {
-                let start = nodes
-                    .first()
-                    .expect("nodes should not be empty")
-                    .span(syntax_tree)
-                    .start;
-                let end = nodes
-                    .last()
-                    .expect("nodes should not be empty")
-                    .span_with_trailing_whitespace(syntax_tree)
-                    .end;
-                start..end
-            }
-            RepeatingNodeRef::None { code_index } => *code_index..*code_index,
-        }
-    }
-
-    fn span_only_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
+    fn recurse_span_end<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<CodeSpanEnd, &'a dyn CodeSpan> {
         match self {
             RepeatingNodeRef::Some(nodes) => nodes
                 .last()
-                .expect("nodes should not be empty")
-                .span_only_trailing_whitespace(syntax_tree),
-            RepeatingNodeRef::None { code_index } => *code_index..*code_index,
+                .expect("repeating node should have at least one node")
+                .recurse_span_end(syntax_tree),
+            RepeatingNodeRef::None { code_index } => Ok(CodeSpanEnd {
+                index: *code_index,
+                index_with_trailing_whitespace: *code_index,
+            }),
         }
     }
 }
@@ -683,21 +700,19 @@ pub struct Group<T> {
     closing: Token,
 }
 
-impl<T> CodeSpanWithoutSyntaxTree for Group<T> {
-    fn span(&self) -> Range<usize> {
-        let start = CodeSpanWithoutSyntaxTree::span(&self.opening).start;
-        let end = CodeSpanWithoutSyntaxTree::span(&self.closing).end;
-        start..end
+impl<T> CodeSpan for Group<T> {
+    fn recurse_span_start<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<usize, &'a dyn CodeSpan> {
+        self.opening.recurse_span_start(syntax_tree)
     }
 
-    fn span_with_trailing_whitespace(&self) -> Range<usize> {
-        let start = CodeSpanWithoutSyntaxTree::span(&self.opening).start;
-        let end = CodeSpanWithoutSyntaxTree::span_with_trailing_whitespace(&self.closing).end;
-        start..end
-    }
-
-    fn span_only_trailing_whitespace(&self) -> Range<usize> {
-        CodeSpanWithoutSyntaxTree::span_only_trailing_whitespace(&self.closing)
+    fn recurse_span_end<'a>(
+        &self,
+        syntax_tree: &'a SyntaxTree,
+    ) -> Result<CodeSpanEnd, &'a dyn CodeSpan> {
+        self.closing.recurse_span_end(syntax_tree)
     }
 }
 
@@ -718,8 +733,8 @@ impl<T: Visualize> Visualize for Group<T> {
         }
         print!(
             "{}...{} ",
-            &code[CodeSpanWithoutSyntaxTree::span(&self.opening)],
-            &code[CodeSpanWithoutSyntaxTree::span(&self.closing)],
+            &code[self.opening.span(syntax_tree)],
+            &code[self.closing.span(syntax_tree)],
         );
         self.content.visualize(syntax_tree, code, indent, false);
     }
@@ -1028,20 +1043,18 @@ macro_rules! concatenation {
         }
 
         impl CodeSpan for $T {
-            fn span(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
-                let start = CodeSpan::span(&first!( self $( $essential_fields )* $last_essential_field), syntax_tree).start;
-                let end = CodeSpan::span(&last!( self $last_essential_field $( $required_fields )* ), syntax_tree).end;
-                start..end
+            fn recurse_span_start<'a>(
+                &self,
+                syntax_tree: &'a SyntaxTree,
+            ) -> Result<usize, &'a dyn CodeSpan> {
+                first!( self $( $essential_fields )* $last_essential_field).recurse_span_start(syntax_tree)
             }
 
-            fn span_with_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
-                let start = CodeSpan::span(&first!( self $( $essential_fields )* $last_essential_field), syntax_tree).start;
-                let end = CodeSpan::span_with_trailing_whitespace(&last!( self $last_essential_field $( $required_fields )* ), syntax_tree).end;
-                start..end
-            }
-
-            fn span_only_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
-                CodeSpan::span_only_trailing_whitespace(&last!( self $( $essential_fields )* $last_essential_field), syntax_tree)
+            fn recurse_span_end<'a>(
+                &self,
+                syntax_tree: &'a SyntaxTree,
+            ) -> Result<CodeSpanEnd, &'a dyn CodeSpan> {
+                last!( self $( $essential_fields )* $last_essential_field).recurse_span_end(syntax_tree)
             }
         }
 
@@ -1132,26 +1145,24 @@ macro_rules! alternation {
         }
 
         impl CodeSpan for $T {
-            fn span(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
+            fn recurse_span_start<'a>(
+                &self,
+                syntax_tree: &'a SyntaxTree,
+            ) -> Result<usize, &'a dyn CodeSpan> {
                 match self {
                     $( Self::$alternative(node_or_token) => {
-                        CodeSpan::span(node_or_token, syntax_tree)
+                        node_or_token.recurse_span_start(syntax_tree)
                     } )*
                 }
             }
 
-            fn span_with_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
+            fn recurse_span_end<'a>(
+                &self,
+                syntax_tree: &'a SyntaxTree,
+            ) -> Result<CodeSpanEnd, &'a dyn CodeSpan> {
                 match self {
                     $( Self::$alternative(node_or_token) => {
-                        CodeSpan::span_with_trailing_whitespace(node_or_token, syntax_tree)
-                    } )*
-                }
-            }
-
-            fn span_only_trailing_whitespace(&self, syntax_tree: &SyntaxTree) -> Range<usize> {
-                match self {
-                    $( Self::$alternative(node_or_token) => {
-                        CodeSpan::span_only_trailing_whitespace(node_or_token, syntax_tree)
+                        node_or_token.recurse_span_end(syntax_tree)
                     } )*
                 }
             }

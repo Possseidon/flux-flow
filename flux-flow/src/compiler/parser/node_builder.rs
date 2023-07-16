@@ -1,5 +1,3 @@
-use crate::compiler::parser::syntax_tree::CodeSpanWithoutSyntaxTree;
-
 use super::{
     grammar::{GrammarBuilder, RecursiveRule},
     syntax_tree::{SyntaxTree, Token},
@@ -276,7 +274,7 @@ impl NodeBuilderInput {
                 }
 
                 NodeBuilderElement::Token { token } => {
-                    print!(" `{}`", &code[CodeSpanWithoutSyntaxTree::span(token)])
+                    print!(" `{}`", &code[token.token_span()])
                 }
                 NodeBuilderElement::Node { node, warnings } => {
                     print!(" ({})", node.0);
