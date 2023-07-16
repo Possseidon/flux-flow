@@ -351,9 +351,14 @@ impl ParseState {
                         false
                     } else if required {
                         self.node_builder_input.repetition_error();
-                        self.skip_token(code, expected, token);
+                        if self.skip_token(code, expected, token) {
+                            true
+                        } else {
+                            self.node_builder_input
+                                .push_end_repetition(self.code_index());
 
-                        true
+                            false
+                        }
                     } else if let TokenKind::Group(group_token) = token.kind {
                         if self.token_streams.contains_group(group_token.kind()) {
                             self.node_builder_input
@@ -362,9 +367,14 @@ impl ParseState {
                             false
                         } else {
                             self.node_builder_input.repetition_error();
-                            self.skip_token(code, expected, token);
+                            if self.skip_token(code, expected, token) {
+                                true
+                            } else {
+                                self.node_builder_input
+                                    .push_end_repetition(self.code_index());
 
-                            true
+                                false
+                            }
                         }
                     } else {
                         if self.node_builder_input.mismatch(Some(self.code_index())) {
@@ -383,9 +393,14 @@ impl ParseState {
             RepeatUntil::Eof => {
                 if let Some(token) = self.next_token(code, false) {
                     self.node_builder_input.repetition_error();
-                    self.skip_token(code, expected, token);
+                    if self.skip_token(code, expected, token) {
+                        true
+                    } else {
+                        self.node_builder_input
+                            .push_end_repetition(self.code_index());
 
-                    true
+                        false
+                    }
                 } else {
                     self.node_builder_input
                         .push_end_repetition(self.code_index());
@@ -397,7 +412,10 @@ impl ParseState {
     }
 
     /// Skips the given token and reports an error.
-    fn skip_token(&mut self, code: &str, expected: &str, token: lexer::Token) {
+    ///
+    /// This might not be possible, since closing group tokens cannot be skipped if there is a
+    /// matching opening group token still awaiting to be closed. In that case `false` is returned.
+    fn skip_token(&mut self, code: &str, expected: &str, token: lexer::Token) -> bool {
         if let TokenKind::Group(GroupToken::Opening(_)) = token.kind {
             let start = self.code_index();
 
@@ -424,12 +442,22 @@ impl ParseState {
             }
 
             self.x_expected_at(expected, start..end);
-        } else {
-            let start = self.code_index();
-            let end = start + token.len.get();
-            self.x_expected_found_y_at(expected, token.kind.name(), start..end);
-            self.token_streams.advance_token(code, token);
+            return true;
         }
+
+        if let TokenKind::Group(GroupToken::Closing(token_kind)) = token.kind {
+            if self.token_streams.contains_group(token_kind.kind()) {
+                self.x_expected(expected);
+                return false;
+            }
+        }
+
+        let start = self.code_index();
+        let end = start + token.len.get();
+        self.x_expected_found_y_at(expected, token.kind.name(), start..end);
+        self.token_streams.advance_token(code, token);
+
+        true
     }
 
     /// Pushes a build request for the given rule and with the given parse mode on the stack.
@@ -521,16 +549,14 @@ impl ParseState {
                 self.parse_requests.pop_remaining_match_requests();
             }
 
-            (GroupParseMode::Required, Some(token)) => {
+            (GroupParseMode::Required, Some(mut token)) => {
                 let start = self.code_index();
-
-                let initial_depth = self.token_streams.group_depth();
-                self.token_streams.advance_token(code, token);
-
-                let mut end = self.code_index();
+                let mut end = start;
                 let mut closing_group = false;
 
-                while let Some(token) = self.next_token(code, false) {
+                let initial_depth = self.token_streams.group_depth();
+
+                loop {
                     if let TokenKind::Group(GroupToken::Closing(group_token)) = token.kind {
                         if self.token_streams.contains_group_before_but_not_after(
                             group_token.kind(),
@@ -556,6 +582,11 @@ impl ParseState {
                     }
 
                     end = range.end;
+
+                    token = match self.next_token(code, false) {
+                        Some(token) => token,
+                        None => break,
+                    };
                 }
 
                 if closing_group {
