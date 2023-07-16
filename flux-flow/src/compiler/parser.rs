@@ -19,7 +19,7 @@ use crate::compiler::{
 
 use self::{
     grammar::{Grammar, RecursiveRule, RuleRef},
-    node_builder::ProcessReaderResult,
+    node_builder::{NodeBuilt, NodeError},
     parse_request::{GroupParseMode, MatchRequest, ParseMode, ParseRequest, RepeatUntil},
     syntax_tree::SyntaxTree,
     token_stream_stack::{TokenInfo, TokenStreamStack},
@@ -143,14 +143,12 @@ impl ParseState {
     ) {
         let named_rule = grammar.rule(build_request.rule);
 
-        let result = self.node_builder_input.build(
-            &mut self.syntax_tree,
-            named_rule.builder,
-            build_request.parse_mode,
-        );
+        let result = self
+            .node_builder_input
+            .build(&mut self.syntax_tree, named_rule.builder);
 
         match result {
-            ProcessReaderResult::NodeBuilt => {
+            Ok(NodeBuilt { warnings: false }) => {
                 self.token_streams.commit();
 
                 match build_request.parse_mode {
@@ -174,7 +172,7 @@ impl ParseState {
                     ParseMode::Alternation => self.parse_requests.pop_remaining_match_requests(),
                 }
             }
-            ProcessReaderResult::NodeBuiltWithWarnings => {
+            Ok(NodeBuilt { warnings: true }) => {
                 self.token_streams.commit();
 
                 match build_request.parse_mode {
@@ -198,13 +196,22 @@ impl ParseState {
                     ParseMode::Alternation => self.parse_requests.pop_remaining_match_requests(),
                 }
             }
-            ProcessReaderResult::Mismatch => {
+            Err(NodeError::Mismatch) => {
                 self.token_streams.revert();
 
                 match build_request.parse_mode {
-                    ParseMode::Essential => self.parse_requests.pop_remaining_match_requests(),
-                    ParseMode::Required => self.x_expected(named_rule.name),
-                    ParseMode::Optional => {}
+                    ParseMode::Essential => {
+                        self.node_builder_input.mismatch(None);
+                        self.parse_requests.pop_remaining_match_requests();
+                    }
+                    ParseMode::Required => {
+                        self.node_builder_input.error();
+                        self.x_expected(named_rule.name);
+                    }
+                    ParseMode::Optional => {
+                        self.node_builder_input
+                            .push_optional_mismatch(self.code_index());
+                    }
                     ParseMode::Repetition { repeat_until } => {
                         if self.repetition_essential_mismatch(
                             code,
@@ -221,17 +228,21 @@ impl ParseState {
                             )
                         }
                     }
-                    ParseMode::Alternation => {}
+                    ParseMode::Alternation => {
+                        self.node_builder_input.alternation_mismatch();
+                    }
                 }
             }
-            ProcessReaderResult::Error => {
+            Err(NodeError::Error) => {
                 self.token_streams.commit();
 
                 match build_request.parse_mode {
-                    ParseMode::Essential => {}
-                    ParseMode::Required => {}
-                    ParseMode::Optional => {}
+                    ParseMode::Essential => self.node_builder_input.error(),
+                    ParseMode::Required => self.node_builder_input.error(),
+                    ParseMode::Optional => self.node_builder_input.error(),
                     ParseMode::Repetition { repeat_until } => {
+                        self.node_builder_input.repetition_error();
+
                         if self.token_streams.current().is_at_end_of_code(code) {
                             self.node_builder_input
                                 .push_end_repetition(self.code_index());
@@ -245,7 +256,10 @@ impl ParseState {
                             );
                         }
                     }
-                    ParseMode::Alternation => self.parse_requests.pop_remaining_match_requests(),
+                    ParseMode::Alternation => {
+                        self.node_builder_input.error();
+                        self.parse_requests.pop_remaining_match_requests();
+                    }
                 }
             }
         }
@@ -429,14 +443,12 @@ impl ParseState {
                 self.parse_requests.extend([last_essential]);
                 self.parse_requests.extend(essential.iter().rev());
 
-                self.node_builder_input
-                    .push_concatenation(self.code_index());
+                self.node_builder_input.push_concatenation();
             }
             RecursiveRule::Alternation { variants } => {
                 self.parse_requests.extend(variants.iter().rev());
 
-                self.node_builder_input
-                    .push_alternation(self.code_index(), variants.len());
+                self.node_builder_input.push_alternation(variants.len());
             }
         }
     }

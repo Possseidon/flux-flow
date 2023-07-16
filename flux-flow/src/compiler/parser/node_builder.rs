@@ -2,7 +2,6 @@ use crate::compiler::parser::syntax_tree::CodeSpanWithoutSyntaxTree;
 
 use super::{
     grammar::{GrammarBuilder, RecursiveRule},
-    parse_request::ParseMode,
     syntax_tree::{SyntaxTree, Token},
 };
 
@@ -45,11 +44,10 @@ enum NodeBuilderElement {
     ///
     /// Repetitions are part of concatenations and thus do not have their own variant in
     /// [`NodeBuilderElement`].
-    Concatenation { code_index: usize },
+    Concatenation,
     /// Marks an alternation and keeps track of mismatches as well as the total number of possible
     /// alternations.
     Alternation {
-        code_index: usize,
         mismatches: usize,
         alternation_len: usize,
     },
@@ -58,7 +56,7 @@ enum NodeBuilderElement {
     /// This immediately cancels the current concatenation or alternation.
     /// The corresponding root is replaced with [`NodeBuilderElement::EssentialMismatch`] and all
     /// following elements are discarded.
-    Mismatch { code_index: usize },
+    Mismatch,
 
     /// A token that matched successfully.
     Token { token: Token },
@@ -84,9 +82,9 @@ enum NodeBuilderElement {
 impl NodeBuilderElement {
     fn is_header(self) -> bool {
         match self {
-            NodeBuilderElement::Concatenation { .. }
+            NodeBuilderElement::Concatenation
             | NodeBuilderElement::Alternation { .. }
-            | NodeBuilderElement::Mismatch { .. } => true,
+            | NodeBuilderElement::Mismatch => true,
             NodeBuilderElement::Token { .. }
             | NodeBuilderElement::Node { .. }
             | NodeBuilderElement::OptionalMismatch { .. }
@@ -119,16 +117,15 @@ pub struct NodeBuilderInput {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProcessReaderResult {
-    /// The current header was replaced with a successfully built node.
-    NodeBuilt,
-    /// A node was built but also did contain errors.
-    ///
-    /// This is used for repetitions, which can be built even if some entries failed to parse.
-    NodeBuiltWithWarnings,
-    /// The current header was popped and the parent header updated according to the parse mode.
+pub struct NodeBuilt {
+    pub warnings: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NodeError {
+    /// The header is a mismatched essential token or node.
     Mismatch,
-    /// The current header was replaced with a call to [`NodeBuilderInput::required_mismatch()`].
+    /// The content contains a mismatched required token or node.
     Error,
 }
 
@@ -141,15 +138,13 @@ impl NodeBuilderInput {
     /// Pushes a new concatenation header.
     ///
     /// This header will only accesses elements that are added after the header has been pushed.
-    pub fn push_concatenation(&mut self, code_index: usize) {
-        self.elements
-            .push(NodeBuilderElement::Concatenation { code_index });
+    pub fn push_concatenation(&mut self) {
+        self.elements.push(NodeBuilderElement::Concatenation);
     }
 
     /// Pushes a new alternation header.
-    pub fn push_alternation(&mut self, code_index: usize, alternation_len: usize) {
+    pub fn push_alternation(&mut self, alternation_len: usize) {
         self.elements.push(NodeBuilderElement::Alternation {
-            code_index,
             mismatches: 0,
             alternation_len,
         });
@@ -162,42 +157,12 @@ impl NodeBuilderInput {
         &mut self,
         syntax_tree: &mut SyntaxTree,
         builder: NodeBuilder,
-        parse_mode: ParseMode,
-    ) -> ProcessReaderResult {
+    ) -> Result<NodeBuilt, NodeError> {
         let mut reader = match NodeBuilderReader::new(self, self.header_index()) {
             Ok(reader) => reader,
-            Err(NodeBuilderReaderError::Mismatch { code_index }) => {
+            Err(error) => {
                 self.pop_header();
-                match parse_mode {
-                    ParseMode::Essential => {
-                        self.mismatch(None);
-                        return ProcessReaderResult::Mismatch;
-                    }
-                    ParseMode::Required => {
-                        self.error();
-                        return ProcessReaderResult::Mismatch;
-                    }
-                    ParseMode::Optional => {
-                        self.push_optional_mismatch(code_index);
-                        return ProcessReaderResult::Mismatch;
-                    }
-                    ParseMode::Repetition { .. } => {
-                        // cannot know yet whether to push end repetition, repetition error, etc...
-                        return ProcessReaderResult::Mismatch;
-                    }
-                    ParseMode::Alternation => {
-                        self.alternation_mismatch();
-                        return ProcessReaderResult::Mismatch;
-                    }
-                }
-            }
-            Err(NodeBuilderReaderError::Error) => {
-                self.pop_header();
-                match parse_mode {
-                    ParseMode::Repetition { .. } => self.repetition_error(),
-                    _ => self.error(),
-                }
-                return ProcessReaderResult::Error;
+                return Err(error);
             }
         };
 
@@ -206,11 +171,7 @@ impl NodeBuilderInput {
 
         self.replace_header(NodeBuilderElement::Node { node, warnings });
 
-        if warnings {
-            ProcessReaderResult::NodeBuiltWithWarnings
-        } else {
-            ProcessReaderResult::NodeBuilt
-        }
+        Ok(NodeBuilt { warnings })
     }
 
     fn header_index(&self) -> usize {
@@ -257,11 +218,7 @@ impl NodeBuilderInput {
 
         let last = self.elements.last_mut().expect("header expected");
         match last {
-            NodeBuilderElement::Concatenation { code_index } => {
-                *last = NodeBuilderElement::Mismatch {
-                    code_index: *code_index,
-                }
-            }
+            NodeBuilderElement::Concatenation => *last = NodeBuilderElement::Mismatch,
             _ => panic!("header expected"),
         }
 
@@ -352,18 +309,11 @@ pub struct NodeBuilderReader<'a> {
     warnings: bool,
 }
 
-enum NodeBuilderReaderError {
-    /// The header is a mismatched essential token or node.
-    Mismatch { code_index: usize },
-    /// The content contains a mismatched required token or node.
-    Error,
-}
-
 impl<'a> NodeBuilderReader<'a> {
     fn new(
         node_builder_input: &'a mut NodeBuilderInput,
         header_index: usize,
-    ) -> Result<Self, NodeBuilderReaderError> {
+    ) -> Result<Self, NodeError> {
         match node_builder_input.elements[header_index] {
             NodeBuilderElement::Concatenation { .. } => {
                 let content_index = header_index + 1;
@@ -372,7 +322,7 @@ impl<'a> NodeBuilderReader<'a> {
                     .copied()
                     .any(NodeBuilderElement::is_error)
                 {
-                    Err(NodeBuilderReaderError::Error)
+                    Err(NodeError::Error)
                 } else {
                     let warnings = node_builder_input.elements[content_index..]
                         .iter()
@@ -386,17 +336,16 @@ impl<'a> NodeBuilderReader<'a> {
                 }
             }
             NodeBuilderElement::Alternation {
-                code_index,
                 mismatches,
                 alternation_len,
             } => {
                 if mismatches == alternation_len {
-                    Err(NodeBuilderReaderError::Mismatch { code_index })
+                    Err(NodeError::Mismatch)
                 } else {
                     let content = node_builder_input.elements[header_index + 1];
 
                     if content.is_error() {
-                        Err(NodeBuilderReaderError::Error)
+                        Err(NodeError::Error)
                     } else {
                         Ok(Self {
                             node_builder_input,
@@ -406,9 +355,7 @@ impl<'a> NodeBuilderReader<'a> {
                     }
                 }
             }
-            NodeBuilderElement::Mismatch { code_index } => {
-                Err(NodeBuilderReaderError::Mismatch { code_index })
-            }
+            NodeBuilderElement::Mismatch => Err(NodeError::Mismatch),
             _ => panic!("header expected"),
         }
     }
