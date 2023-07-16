@@ -58,10 +58,18 @@ pub fn parse(code: &str) -> ModuleParseResult {
     state.push_build_request(grammar, grammar.initial_rule(), ParseMode::Required);
 
     // state.visualize(code, grammar);
+    // let mut i = 0;
 
     while let Some(request) = state.parse_requests.pop() {
+        // Debugging tip:
+        // 1. Run without breakpoint
+        // 2. Look for error in output and copy its leading integer
+        // 3. Put a conditional breakpoint with `i == N` on the following line:
         state.dispatch_parse_request(code, grammar, request);
+
+        // println!("{i}");
         // state.visualize(code, grammar);
+        // i += 1;
     }
 
     state.token_streams.validate(code);
