@@ -1371,8 +1371,11 @@ struct ExpressionStatement {
 
 enum ExpressionSuffix {
     Binary: (ref BinaryOperation)
-    StructCall: (ref StructCall)
-    ValueCall: (ref ValueCall)
+    // FieldAccess: (ref FieldAccess)
+    StructCall: (ref StructExpression)
+    ValueCall: (ref GroupExpression)
+    // ArrayCall: (ref ArrayExpression)
+    // A theoretical `BlockCall` would cause ambiguities with `if <expression> { }`
 }
 
 struct ForLoop {
@@ -1477,10 +1480,6 @@ enum StatementItem {
     Function: (ref Function)
 }
 
-struct StructCall {
-  > value: (ref StructExpression)
-}
-
 struct StructExpression {
   > fields in (): { ref StructExpressionField }
 }
@@ -1512,11 +1511,6 @@ struct Use {
   > use_kw: use
     // TODO: use path tree
     semi: ;
-}
-
-struct ValueCall {
-  > /// Not optional, since empty parens are treated as a [`StructExpression`].
-    parameter in (): (ref Expression)
 }
 
 struct WhileLoop {
