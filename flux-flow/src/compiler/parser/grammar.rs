@@ -34,6 +34,8 @@ pub struct NamedRule {
 /// A parsing rule that recursively references other rules.
 #[derive(Clone, Debug, From)]
 pub enum RecursiveRule {
+    /// Parses a single rule repeatedly until the end of the input is reached.
+    Global(GlobalRule),
     /// Parses all given rules in order.
     ///
     /// 1. `essential`: Essential rules do not cause an immediate hard error.
@@ -52,6 +54,11 @@ pub enum RecursiveRule {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GlobalRule {
+    pub rule: Rule,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EssentialRule {
     pub group_rule: GroupRule,
     pub parse_mode: EssentialRuleMode,
@@ -62,7 +69,6 @@ pub enum EssentialRuleMode {
     Essential,
     Optional,
     Repetition,
-    GlobalRepetition,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,7 +82,6 @@ pub enum RequiredRuleMode {
     Required,
     Optional,
     Repetition,
-    GlobalRepetition,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

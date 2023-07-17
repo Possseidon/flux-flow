@@ -3,8 +3,8 @@ use derive_more::From;
 use crate::compiler::lexer::{GrammarToken, GroupKind, GroupToken, TokenKind};
 
 use super::grammar::{
-    AlternationRule, EssentialRule, EssentialRuleMode, Grammar, RequiredRule, RequiredRuleMode,
-    Rule, RuleRef,
+    AlternationRule, EssentialRule, EssentialRuleMode, GlobalRule, Grammar, RequiredRule,
+    RequiredRuleMode, Rule, RuleRef,
 };
 
 /// Contains a stack of [`ParseRequest`]s.
@@ -205,8 +205,8 @@ impl ParseRequestStack {
     }
 }
 
-impl<'a> Extend<&'a EssentialRule> for ParseRequestStack {
-    fn extend<T: IntoIterator<Item = &'a EssentialRule>>(&mut self, iter: T) {
+impl Extend<EssentialRule> for ParseRequestStack {
+    fn extend<T: IntoIterator<Item = EssentialRule>>(&mut self, iter: T) {
         for rule in iter {
             self.parse_requests
                 .extend(rule.group_rule.group.map(|group| {
@@ -239,8 +239,8 @@ impl<'a> Extend<&'a EssentialRule> for ParseRequestStack {
     }
 }
 
-impl<'a> Extend<&'a RequiredRule> for ParseRequestStack {
-    fn extend<T: IntoIterator<Item = &'a RequiredRule>>(&mut self, iter: T) {
+impl Extend<RequiredRule> for ParseRequestStack {
+    fn extend<T: IntoIterator<Item = RequiredRule>>(&mut self, iter: T) {
         for rule in iter {
             self.parse_requests
                 .extend(rule.group_rule.group.map(|group| {
@@ -273,26 +273,27 @@ impl<'a> Extend<&'a RequiredRule> for ParseRequestStack {
     }
 }
 
-impl<'a> Extend<&'a AlternationRule> for ParseRequestStack {
-    fn extend<T: IntoIterator<Item = &'a AlternationRule>>(&mut self, iter: T) {
-        for rule in iter {
-            self.parse_requests
-                .push(ParseRequest::Match(match rule.rule {
-                    Rule::Token(token) => MatchRequest::Token {
-                        token_kind: token,
-                        parse_mode: ParseMode::Alternation,
-                    },
-                    Rule::Ref(rule_ref) => MatchRequest::Rule {
-                        rule_ref,
-                        parse_mode: ParseMode::Alternation,
-                    },
-                }));
-        }
+impl From<GlobalRule> for ParseRequest {
+    fn from(value: GlobalRule) -> Self {
+        ParseRequest::Match(match value.rule {
+            Rule::Token(token) => MatchRequest::Token {
+                token_kind: token,
+                parse_mode: ParseMode::Repetition {
+                    repeat_until: RepeatUntil::Eof,
+                },
+            },
+            Rule::Ref(rule_ref) => MatchRequest::Rule {
+                rule_ref,
+                parse_mode: ParseMode::Repetition {
+                    repeat_until: RepeatUntil::Eof,
+                },
+            },
+        })
     }
 }
 
-impl From<&EssentialRule> for ParseMode {
-    fn from(value: &EssentialRule) -> Self {
+impl From<EssentialRule> for ParseMode {
+    fn from(value: EssentialRule) -> Self {
         match value.parse_mode {
             EssentialRuleMode::Essential => Self::Essential,
             EssentialRuleMode::Optional => Self::Optional,
@@ -305,15 +306,12 @@ impl From<&EssentialRule> for ParseMode {
                     None => RepeatUntil::Mismatch,
                 },
             },
-            EssentialRuleMode::GlobalRepetition => Self::Repetition {
-                repeat_until: RepeatUntil::Eof,
-            },
         }
     }
 }
 
-impl From<&RequiredRule> for ParseMode {
-    fn from(value: &RequiredRule) -> Self {
+impl From<RequiredRule> for ParseMode {
+    fn from(value: RequiredRule) -> Self {
         match value.parse_mode {
             RequiredRuleMode::Required => Self::Required,
             RequiredRuleMode::Optional => Self::Optional,
@@ -326,9 +324,29 @@ impl From<&RequiredRule> for ParseMode {
                     None => RepeatUntil::Mismatch,
                 },
             },
-            RequiredRuleMode::GlobalRepetition => Self::Repetition {
-                repeat_until: RepeatUntil::Eof,
+        }
+    }
+}
+
+impl From<AlternationRule> for ParseRequest {
+    fn from(value: AlternationRule) -> Self {
+        ParseRequest::Match(match value.rule {
+            Rule::Token(token) => MatchRequest::Token {
+                token_kind: token,
+                parse_mode: ParseMode::Alternation,
             },
+            Rule::Ref(rule_ref) => MatchRequest::Rule {
+                rule_ref,
+                parse_mode: ParseMode::Alternation,
+            },
+        })
+    }
+}
+
+impl Extend<AlternationRule> for ParseRequestStack {
+    fn extend<T: IntoIterator<Item = AlternationRule>>(&mut self, iter: T) {
+        for rule in iter {
+            self.parse_requests.push(rule.into());
         }
     }
 }

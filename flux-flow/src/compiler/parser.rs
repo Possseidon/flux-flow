@@ -466,19 +466,24 @@ impl ParseState {
         }));
 
         match &grammar.rule(rule_ref).rule {
+            RecursiveRule::Global(rule) => {
+                self.parse_requests.push(*rule);
+
+                self.node_builder_input.push_concatenation();
+            }
             RecursiveRule::Concatenation {
                 essential,
                 last_essential,
                 required,
             } => {
-                self.parse_requests.extend(required.iter().rev());
-                self.parse_requests.extend([last_essential]);
-                self.parse_requests.extend(essential.iter().rev());
+                self.parse_requests.extend(required.iter().copied().rev());
+                self.parse_requests.extend([*last_essential]);
+                self.parse_requests.extend(essential.iter().copied().rev());
 
                 self.node_builder_input.push_concatenation();
             }
             RecursiveRule::Alternation { variants } => {
-                self.parse_requests.extend(variants.iter().rev());
+                self.parse_requests.extend(variants.iter().copied().rev());
 
                 self.node_builder_input.push_alternation(variants.len());
             }

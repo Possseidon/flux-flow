@@ -12,8 +12,8 @@ use crate::compiler::lexer::{GrammarToken, GroupKind, KeywordToken, PunctuationT
 
 use super::{
     grammar::{
-        AlternationRule, EssentialRule, EssentialRuleMode, Grammar, GrammarBuilder, GroupRule,
-        RecursiveRule, RequiredRule, RequiredRuleMode, Rule,
+        AlternationRule, EssentialRule, EssentialRuleMode, GlobalRule, Grammar, GrammarBuilder,
+        GroupRule, RecursiveRule, RequiredRule, RequiredRuleMode, Rule,
     },
     node_builder::{
         Buildable, NodeBuilderContent, NodeBuilderReadable, NodeBuilderReader, UntypedNodeRef,
@@ -870,14 +870,6 @@ macro_rules! concatenation_rule {
             }
         }
     };
-    ( $grammar:ident $Kind:ident { global $( $Field:tt )* } $( $group:tt )? ) => {
-        paste! {
-            [<$Kind Rule>] {
-                group_rule: group_rule!($grammar ( $( $group )? ) $( $Field )* ),
-                parse_mode: [<$Kind RuleMode>]::GlobalRepetition,
-            }
-        }
-    };
     ( $grammar:ident $Kind:ident { $( $Field:tt )* } $( $group:tt )? ) => {
         paste! {
             [<$Kind Rule>] {
@@ -903,14 +895,6 @@ macro_rules! concatenation_rule {
             }
         }
     };
-    ( $grammar:ident $Kind:ident { global ref $T:ident } $( $group:tt )? ) => {
-        paste! {
-            [<$Kind Rule>] {
-                group_rule: group_rule!($grammar ( $( $group )? ) ref $T),
-                parse_mode: [<$Kind RuleMode>]::GlobalRepetition,
-            }
-        }
-    };
     ( $grammar:ident $Kind:ident { ref $T:ident } $( $group:tt )? ) => {
         paste! {
             [<$Kind Rule>] {
@@ -930,11 +914,10 @@ macro_rules! concatenation_rule {
     };
 }
 
-#[rustfmt::skip]
 macro_rules! field_type {
     ( (ref $T:ident) ) => { NodeRef<$T> };
     ( [ref $T:ident] ) => { OptionalNodeRef<$T> };
-    ( { $( global )? ref $T:ident } ) => { RepeatingNodeRef<$T> };
+    ( { ref $T:ident } ) => { RepeatingNodeRef<$T> };
     ( ( $( $rule:tt )* ) ) => { Token };
     ( [ $( $rule:tt )* ] ) => { OptionalToken };
     ( { $( $rule:tt )* } ) => { RepeatingToken };
@@ -1001,7 +984,103 @@ macro_rules! last {
     };
     ( $self:ident $last:ident ) => {
         $self.$last
-    }
+    };
+}
+
+macro_rules! global_field {
+    ( { ref $T:ident } ) => { RepeatingNodeRef<$T> };
+    ( { $( $rule:tt )* } ) => { RepeatingToken };
+}
+
+macro_rules! global_rule {
+    ( $grammar:ident { ref $T:ident } ) => { Rule::Ref($grammar.rule::<$T>()) };
+    ( $grammar:ident { $( $token:tt )* } ) => { Rule::Token(token!( $( $token )* )) };
+}
+
+macro_rules! global {
+    ( $( #[ $( $meta:meta )* ] )* $T:ident {
+        $( #[ $( $field_meta:meta )* ] )* $field:ident : $Field:tt
+    } ) => {
+        $( #[ $( $meta )* ] )*
+        #[derive(Clone, Debug)]
+        pub struct $T {
+            $( #[ $( $field_meta )* ] )*
+            pub $field: global_field!($Field),
+        }
+
+        // No impl_copy_if_no_repetition, since this always has a single repetition
+
+        impl $T {
+            pub fn grammar() -> &'static Grammar {
+                lazy_static! {
+                    static ref GRAMMAR: Grammar = Grammar::new::<$T>();
+                }
+                &GRAMMAR
+            }
+        }
+
+        impl CodeSpan for $T {
+            fn recurse_span_start<'a>(
+                &self,
+                syntax_tree: &'a SyntaxTree,
+            ) -> Result<usize, &'a dyn CodeSpan> {
+               self.$field.recurse_span_start(syntax_tree)
+            }
+
+            fn recurse_span_end<'a>(
+                &self,
+                syntax_tree: &'a SyntaxTree,
+            ) -> Result<CodeSpanEnd, &'a dyn CodeSpan> {
+                self.$field.recurse_span_end(syntax_tree)
+            }
+        }
+
+        impl Visualize for $T {
+            fn visualize(
+                &self,
+                syntax_tree: &SyntaxTree,
+                code: &str,
+                mut indent: usize,
+                with_indent: bool,
+            ) {
+                if with_indent {
+                    print_indent(indent);
+                }
+                println!("{}", <Self as Buildable>::name());
+                indent += 1;
+                print_indent(indent);
+                print!("{}: ", stringify!($field));
+                self.$field.visualize(syntax_tree, code, indent, false);
+            }
+        }
+
+        impl_node_ref_helpers!($T);
+
+        impl Buildable for $T {
+            fn name() -> &'static str {
+                stringify!($T)
+            }
+
+            fn rule(#[allow(unused_variables)] grammar: &mut GrammarBuilder) -> RecursiveRule {
+                RecursiveRule::Global(GlobalRule {
+                    rule: global_rule!(grammar $Field),
+                })
+            }
+
+            paste! {
+                fn build(
+                    syntax_tree: &mut SyntaxTree,
+                    reader: &mut NodeBuilderReader,
+                ) -> UntypedNodeRef {
+                    let node_ref = UntypedNodeRef(syntax_tree.nodes.[<$T:snake _nodes>].len());
+                    syntax_tree.nodes.[<$T:snake _nodes>].push(Self {
+                        $field: reader.read(),
+                    });
+                    node_ref
+                }
+            }
+        }
+    };
 }
 
 macro_rules! concatenation {
@@ -1229,6 +1308,9 @@ macro_rules! alternation {
 }
 
 macro_rules! recursive_rule {
+    ( $( #[ $( $meta:meta )* ] )* mod $T:ident $body:tt ) => {
+        global!( $( #[ $( $meta )* ] )* $T $body);
+    };
     ( $( #[ $( $meta:meta )* ] )* struct $T:ident $body:tt ) => {
         concatenation!( $( #[ $( $meta )* ] )* $T $body);
     };
@@ -1435,8 +1517,8 @@ struct LoopBlock {
     block: (ref Block)
 }
 
-struct Module {
-  > items: { global ref Item }
+mod Module {
+    items: { ref Item }
 }
 
 struct Path {
