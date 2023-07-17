@@ -33,9 +33,6 @@ use super::{
     },
 };
 
-// TODO: Required mismatch does not cancel remaining node builder inputs.
-//       Do not push more nodes if node builder is required mismatch.
-
 pub struct ModuleParseResult {
     pub syntax_tree: SyntaxTree,
     pub diagnostics: Vec<Diagnostic>,
