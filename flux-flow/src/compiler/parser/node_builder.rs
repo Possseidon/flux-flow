@@ -115,11 +115,6 @@ pub struct NodeBuilderInput {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NodeBuilt {
-    pub warnings: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NodeError {
     /// The header is a mismatched essential token or node.
     Mismatch,
@@ -155,7 +150,7 @@ impl NodeBuilderInput {
         &mut self,
         syntax_tree: &mut SyntaxTree,
         builder: NodeBuilder,
-    ) -> Result<NodeBuilt, NodeError> {
+    ) -> Result<(), NodeError> {
         let mut reader = match NodeBuilderReader::new(self, self.header_index()) {
             Ok(reader) => reader,
             Err(error) => {
@@ -169,7 +164,7 @@ impl NodeBuilderInput {
 
         self.replace_header(NodeBuilderElement::Node { node, warnings });
 
-        Ok(NodeBuilt { warnings })
+        Ok(())
     }
 
     fn header_index(&self) -> usize {

@@ -19,7 +19,7 @@ use crate::compiler::{
 
 use self::{
     grammar::{Grammar, RecursiveRule, RuleRef},
-    node_builder::{NodeBuilt, NodeError},
+    node_builder::NodeError,
     parse_request::{GroupParseMode, MatchRequest, ParseMode, ParseRequest, RepeatUntil},
     syntax_tree::SyntaxTree,
     token_stream_stack::{TokenInfo, TokenStreamStack},
@@ -153,37 +153,11 @@ impl ParseState {
             .build(&mut self.syntax_tree, named_rule.builder);
 
         match result {
-            Ok(NodeBuilt { warnings: false }) => {
+            Ok(()) => {
                 self.token_streams.commit();
 
                 match build_request.parse_mode {
-                    ParseMode::Essential => {}
-                    ParseMode::Required => {}
-                    ParseMode::Optional => {}
-                    ParseMode::Repetition { repeat_until } => {
-                        if self.token_streams.current().is_at_end_of_code(code) {
-                            self.node_builder_input
-                                .push_end_repetition(self.code_index());
-                        } else {
-                            self.push_build_request(
-                                grammar,
-                                build_request.rule,
-                                ParseMode::Repetition {
-                                    repeat_until: repeat_until.with_required(),
-                                },
-                            );
-                        }
-                    }
-                    ParseMode::Alternation => self.parse_requests.pop_remaining_match_requests(),
-                }
-            }
-            Ok(NodeBuilt { warnings: true }) => {
-                self.token_streams.commit();
-
-                match build_request.parse_mode {
-                    ParseMode::Essential => {}
-                    ParseMode::Required => {}
-                    ParseMode::Optional => {}
+                    ParseMode::Essential | ParseMode::Required | ParseMode::Optional => {}
                     ParseMode::Repetition { repeat_until } => {
                         if self.token_streams.current().is_at_end_of_code(code) {
                             self.node_builder_input
@@ -242,9 +216,9 @@ impl ParseState {
                 self.token_streams.commit();
 
                 match build_request.parse_mode {
-                    ParseMode::Essential => self.node_builder_input.error(),
-                    ParseMode::Required => self.node_builder_input.error(),
-                    ParseMode::Optional => self.node_builder_input.error(),
+                    ParseMode::Essential | ParseMode::Required | ParseMode::Optional => {
+                        self.node_builder_input.error()
+                    }
                     ParseMode::Repetition { repeat_until } => {
                         self.node_builder_input.repetition_error();
 
