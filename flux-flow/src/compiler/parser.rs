@@ -269,8 +269,6 @@ impl ParseState {
 
             (ParseMode::Required, _) => {
                 self.node_builder_input.error();
-
-                // self.skip_maybe_token(code, token_kind.name(), token);
                 self.x_expected(token_kind.name())
             }
 
