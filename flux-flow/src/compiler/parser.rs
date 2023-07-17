@@ -326,7 +326,7 @@ impl ParseState {
                             false
                         } else {
                             self.node_builder_input.repetition_error();
-                            if self.skip_token(code, expected, token) {
+                            if self.skip_token(code, expected, Some(group_kind), token) {
                                 true
                             } else {
                                 self.node_builder_input
@@ -337,7 +337,7 @@ impl ParseState {
                         }
                     } else if required {
                         self.node_builder_input.repetition_error();
-                        if self.skip_token(code, expected, token) {
+                        if self.skip_token(code, expected, Some(group_kind), token) {
                             true
                         } else {
                             self.node_builder_input
@@ -362,7 +362,7 @@ impl ParseState {
             RepeatUntil::Eof => {
                 if let Some(token) = self.next_token(code, false) {
                     self.node_builder_input.repetition_error();
-                    if self.skip_token(code, expected, token) {
+                    if self.skip_token(code, expected, None, token) {
                         true
                     } else {
                         self.node_builder_input
@@ -384,7 +384,13 @@ impl ParseState {
     ///
     /// This might not be possible, since closing group tokens cannot be skipped if there is a
     /// matching opening group token still awaiting to be closed. In that case `false` is returned.
-    fn skip_token(&mut self, code: &str, expected: &str, token: lexer::Token) -> bool {
+    fn skip_token(
+        &mut self,
+        code: &str,
+        expected: &str,
+        expected_closing_group: Option<GroupKind>,
+        token: lexer::Token,
+    ) -> bool {
         if let TokenKind::Group(GroupToken::Opening(_)) = token.kind {
             let start = self.code_index();
 
@@ -410,20 +416,41 @@ impl ParseState {
                 end = self.token_streams.advance_token(code, token).range.end;
             }
 
-            self.x_expected_at(expected, start..end);
+            if let Some(expected_closing_group) = expected_closing_group {
+                self.x_or_y_expected_at(
+                    expected,
+                    expected_closing_group.closing_name(),
+                    start..end,
+                );
+            } else {
+                self.x_expected_at(expected, start..end);
+            }
             return true;
         }
 
         if let TokenKind::Group(GroupToken::Closing(token_kind)) = token.kind {
             if self.token_streams.contains_group(token_kind.kind()) {
-                self.x_expected(expected);
+                if let Some(expected_closing_group) = expected_closing_group {
+                    self.x_or_y_expected(expected, expected_closing_group.closing_name());
+                } else {
+                    self.x_expected(expected);
+                }
                 return false;
             }
         }
 
         let start = self.code_index();
         let end = start + token.len.get();
-        self.x_expected_found_y_at(expected, token.kind.name(), start..end);
+        if let Some(expected_closing_group) = expected_closing_group {
+            self.x_or_y_expected_found_z_at(
+                expected,
+                expected_closing_group.closing_name(),
+                token.kind.name(),
+                start..end,
+            );
+        } else {
+            self.x_expected_found_y_at(expected, token.kind.name(), start..end);
+        }
         self.token_streams.advance_token(code, token);
 
         true
@@ -643,10 +670,6 @@ impl ParseState {
         self.error_at(anyhow!("{x} expected"), range);
     }
 
-    fn x_expected_found_y(&mut self, x: &str, y: &str) {
-        self.error(anyhow!("{x} expected, found {y}"));
-    }
-
     fn x_expected_found_y_at(&mut self, x: &str, y: &str, range: Range<usize>) {
         self.error_at(anyhow!("{x} expected, found {y}"), range);
     }
@@ -655,8 +678,8 @@ impl ParseState {
         self.error(anyhow!("{x} or {y} expected"));
     }
 
-    fn x_or_y_expected_found_z(&mut self, x: &str, y: &str, z: &str) {
-        self.error(anyhow!("{x} or {y} expected, found {z}"));
+    fn x_or_y_expected_at(&mut self, x: &str, y: &str, range: Range<usize>) {
+        self.error_at(anyhow!("{x} or {y} expected"), range);
     }
 
     fn x_or_y_expected_found_z_at(&mut self, x: &str, y: &str, z: &str, range: Range<usize>) {
