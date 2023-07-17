@@ -407,12 +407,18 @@ fn lex_raw_string(after_r: &str) -> Result<&str, LexError> {
 }
 
 fn find_line_break(current: &str) -> usize {
-    // TODO: Very inefficient for '\r' only files.
-    //       The first '\n' search will always search through the remainder of the entire file.
-    current
-        .find('\n')
-        .or_else(|| current.find('\r'))
-        .unwrap_or(current.len())
+    let bytes = current.as_bytes();
+
+    let line_break = bytes
+        .iter()
+        .enumerate()
+        .find_map(|(line, byte)| [b'\n', b'\r'].contains(byte).then_some(line))
+        .unwrap_or(bytes.len());
+
+    match current.as_bytes().get(line_break + 1) {
+        Some(b'\n') => line_break + 1,
+        _ => line_break,
+    }
 }
 
 fn is_whitespace_token(token_kind: TokenKind) -> bool {
