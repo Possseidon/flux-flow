@@ -13,7 +13,7 @@ use crate::compiler::lexer::{GrammarToken, GroupKind, KeywordToken, PunctuationT
 use super::{
     grammar::{
         AlternationRule, EssentialRule, EssentialRuleMode, GlobalRule, Grammar, GrammarBuilder,
-        GroupRule, RecursiveRule, RequiredRule, RequiredRuleMode, Rule,
+        GroupRule, LastEssentialRule, RecursiveRule, RequiredRule, RequiredRuleMode, Rule,
     },
     node_builder::{
         Buildable, NodeBuilderContent, NodeBuilderReadable, NodeBuilderReader, UntypedNodeRef,
@@ -825,11 +825,9 @@ macro_rules! token {
 }
 
 macro_rules! rule {
-    // small hack of reusing `rule!` for unpacking of alternation types
     ( $grammar:ident ( $( $inner:tt )* ) ) => { rule!($grammar $( $inner )* ) };
-    // but forbid optional and repeating variants
-    ( $grammar:ident [ $( $inner:tt )* ] ) => { compile_error!("alternations do not support optional variants") };
-    ( $grammar:ident { $( $inner:tt )* } ) => { compile_error!("alternations do not support repeating variants") };
+    ( $grammar:ident [ $( $inner:tt )* ] ) => { rule!($grammar $( $inner )* ) };
+    ( $grammar:ident { $( $inner:tt )* } ) => { rule!($grammar $( $inner )* ) };
 
     ( $grammar:ident ref $T:ident ) => { Rule::Ref($grammar.rule::<$T>()) };
     ( $grammar:ident $( $token:tt )* ) => { Rule::Token(token!( $( $token )* )) };
@@ -837,10 +835,15 @@ macro_rules! rule {
 
 #[rustfmt::skip]
 macro_rules! group_kind {
-    ( () ) => { Some(GroupKind::Paren) };
-    ( [] ) => { Some(GroupKind::Brack) };
-    ( {} ) => { Some(GroupKind::Curly) };
-    ( < ) => { Some(GroupKind::Angle) };
+    ( () ) => { GroupKind::Paren };
+    ( [] ) => { GroupKind::Brack };
+    ( {} ) => { GroupKind::Curly };
+    ( < ) => { GroupKind::Angle };
+}
+
+#[rustfmt::skip]
+macro_rules! some_group_kind {
+    ( $group:tt ) => { Some(group_kind!($group)) };
     () => { None };
 }
 
@@ -848,7 +851,7 @@ macro_rules! group_rule {
     ( $grammar:ident ( $( $group:tt )? ) $( $Field:tt )* ) => {
         GroupRule {
             rule: rule!($grammar $( $Field )* ),
-            group: group_kind!( $( $group )? ),
+            group: some_group_kind!( $( $group )? ),
         }
     };
 }
@@ -914,14 +917,25 @@ macro_rules! concatenation_rule {
     };
 }
 
-macro_rules! field_type {
-    ( (ref $T:ident) ) => { NodeRef<$T> };
-    ( [ref $T:ident] ) => { OptionalNodeRef<$T> };
-    ( { ref $T:ident } ) => { RepeatingNodeRef<$T> };
-    ( ( $( $rule:tt )* ) ) => { Token };
-    ( [ $( $rule:tt )* ] ) => { OptionalToken };
-    ( { $( $rule:tt )* } ) => { RepeatingToken };
-    ( $( $rule:tt )* ) => { Token };
+#[rustfmt::skip]
+macro_rules! essential_rule_mode {
+    ( ( $( $_:tt )* ) ) => { EssentialRuleMode::Essential };
+    ( [ $( $_:tt )* ] ) => { EssentialRuleMode::Optional };
+    ( { $( $_:tt )* } ) => { EssentialRuleMode::Repetition };
+    ( $( $_:tt )* ) => { EssentialRuleMode::Essential };
+}
+
+macro_rules! last_essential_rule {
+    ( $grammar:ident $Field:tt ) => {
+        LastEssentialRule::Rule(rule!($grammar $Field))
+    };
+    ( $grammar:ident $Field:tt $group:tt ) => {
+        LastEssentialRule::Grouped {
+            rule: rule!($grammar $Field),
+            group_kind: group_kind!($group),
+            parse_mode: essential_rule_mode!($Field),
+        }
+    };
 }
 
 macro_rules! impl_node_ref_helpers {
@@ -952,6 +966,16 @@ macro_rules! impl_node_ref_helpers {
             }
         }
     };
+}
+
+macro_rules! field_type {
+    ( (ref $T:ident) ) => { NodeRef<$T> };
+    ( [ref $T:ident] ) => { OptionalNodeRef<$T> };
+    ( { ref $T:ident } ) => { RepeatingNodeRef<$T> };
+    ( ( $( $rule:tt )* ) ) => { Token };
+    ( [ $( $rule:tt )* ] ) => { OptionalToken };
+    ( { $( $rule:tt )* } ) => { RepeatingToken };
+    ( $( $rule:tt )* ) => { Token };
 }
 
 macro_rules! field {
@@ -1176,7 +1200,7 @@ macro_rules! concatenation {
             fn rule(#[allow(unused_variables)] grammar: &mut GrammarBuilder) -> RecursiveRule {
                 RecursiveRule::Concatenation {
                     essential: vec![ $( concatenation_rule!(grammar Essential $EssentialFields $( $essential_field_groups )? ), )* ].into_boxed_slice(),
-                    last_essential: concatenation_rule!(grammar Essential $LastEssentialField $( $last_essential_field_group )? ),
+                    last_essential: last_essential_rule!(grammar $LastEssentialField $( $last_essential_field_group )? ),
                     required: vec![ $( concatenation_rule!(grammar Required $RequiredFields $( $required_field_groups )? ), )* ].into_boxed_slice(),
                 }
             }
@@ -1391,12 +1415,7 @@ enum BinaryOperator {
 ///
 /// See [`LabeledBlock`] if the block might have a label.
 struct Block {
-    > content in {}: (ref BlockContent)
-}
-
-/// A series of statements and an optional final expression.
-struct BlockContent {
-  > statements: { ref Statement }
+    > content in {}: { ref Statement }
 }
 
 /// Expressions that come with a block.

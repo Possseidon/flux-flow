@@ -3,8 +3,8 @@ use derive_more::From;
 use crate::compiler::lexer::{GrammarToken, GroupKind, GroupToken, TokenKind};
 
 use super::grammar::{
-    AlternationRule, EssentialRule, EssentialRuleMode, GlobalRule, Grammar, RequiredRule,
-    RequiredRuleMode, Rule, RuleRef,
+    AlternationRule, EssentialRule, EssentialRuleMode, GlobalRule, Grammar, LastEssentialRule,
+    RequiredRule, RequiredRuleMode, Rule, RuleRef,
 };
 
 /// Contains a stack of [`ParseRequest`]s.
@@ -273,6 +273,57 @@ impl Extend<RequiredRule> for ParseRequestStack {
     }
 }
 
+impl Extend<LastEssentialRule> for ParseRequestStack {
+    fn extend<T: IntoIterator<Item = LastEssentialRule>>(&mut self, iter: T) {
+        for rule in iter {
+            self.parse_requests.extend(match rule {
+                LastEssentialRule::Rule(_) => None,
+                LastEssentialRule::Grouped { group_kind, .. } => {
+                    Some(ParseRequest::Match(MatchRequest::Group {
+                        token_kind: group_kind.closing_token().into(),
+                        parse_mode: GroupParseMode::Required,
+                    }))
+                }
+            });
+
+            self.parse_requests.push(ParseRequest::Match(match rule {
+                LastEssentialRule::Rule(Rule::Token(token_kind)) => MatchRequest::Token {
+                    token_kind,
+                    parse_mode: ParseMode::Essential,
+                },
+                LastEssentialRule::Rule(Rule::Ref(rule_ref)) => MatchRequest::Rule {
+                    rule_ref,
+                    parse_mode: ParseMode::Essential,
+                },
+                LastEssentialRule::Grouped {
+                    rule: Rule::Token(token_kind),
+                    ..
+                } => MatchRequest::Token {
+                    token_kind,
+                    parse_mode: rule.into(),
+                },
+                LastEssentialRule::Grouped {
+                    rule: Rule::Ref(rule_ref),
+                    ..
+                } => MatchRequest::Rule {
+                    rule_ref,
+                    parse_mode: rule.into(),
+                },
+            }));
+
+            self.parse_requests.extend(match rule {
+                LastEssentialRule::Rule(_) => None,
+                LastEssentialRule::Grouped { group_kind, .. } => {
+                    Some(ParseRequest::Match(MatchRequest::Group {
+                        token_kind: group_kind.opening_token().into(),
+                        parse_mode: GroupParseMode::Essential,
+                    }))
+                }
+            });
+        }
+    }
+}
+
 impl From<GlobalRule> for ParseRequest {
     fn from(value: GlobalRule) -> Self {
         ParseRequest::Match(match value.rule {
@@ -304,6 +355,28 @@ impl From<EssentialRule> for ParseMode {
                         required: false,
                     },
                     None => RepeatUntil::Mismatch,
+                },
+            },
+        }
+    }
+}
+
+impl From<LastEssentialRule> for ParseMode {
+    fn from(value: LastEssentialRule) -> Self {
+        match value {
+            LastEssentialRule::Rule(_) => ParseMode::Essential,
+            LastEssentialRule::Grouped {
+                group_kind,
+                parse_mode,
+                ..
+            } => match parse_mode {
+                EssentialRuleMode::Essential => Self::Essential,
+                EssentialRuleMode::Optional => Self::Optional,
+                EssentialRuleMode::Repetition => Self::Repetition {
+                    repeat_until: RepeatUntil::ClosingGroup {
+                        group_kind,
+                        required: false,
+                    },
                 },
             },
         }

@@ -43,10 +43,7 @@ pub enum RecursiveRule {
     /// 3. `required`: Required rules cause an immediate hard error.
     Concatenation {
         essential: Box<[EssentialRule]>,
-        // TODO: Ensure that this can never be optional or repetition through the type system.
-        //       But GlobalRepetition is allowed, but only if it only makes sense if it isn't
-        //       followed by anything.
-        last_essential: EssentialRule,
+        last_essential: LastEssentialRule,
         required: Box<[RequiredRule]>,
     },
     /// Tries to parse the given rules in order until one matches.
@@ -69,6 +66,20 @@ pub enum EssentialRuleMode {
     Essential,
     Optional,
     Repetition,
+}
+
+/// The last essential rule in a concatenation cannot be optional or a repetition unless it is
+/// surrounded by group tokens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LastEssentialRule {
+    /// Just a single rule.
+    Rule(Rule),
+    /// A rule wrapped in a group, which allows it to be optional or a repetition.
+    Grouped {
+        rule: Rule,
+        group_kind: GroupKind,
+        parse_mode: EssentialRuleMode,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
