@@ -349,16 +349,6 @@ impl ParseState {
                             .push_end_repetition(self.code_index());
 
                         false
-                    } else if required {
-                        self.node_builder_input.repetition_error();
-                        if self.skip_token(code, expected, token) {
-                            true
-                        } else {
-                            self.node_builder_input
-                                .push_end_repetition(self.code_index());
-
-                            false
-                        }
                     } else if let TokenKind::Group(group_token) = token.kind {
                         if self.token_streams.contains_group(group_token.kind()) {
                             self.node_builder_input
@@ -375,6 +365,16 @@ impl ParseState {
 
                                 false
                             }
+                        }
+                    } else if required {
+                        self.node_builder_input.repetition_error();
+                        if self.skip_token(code, expected, token) {
+                            true
+                        } else {
+                            self.node_builder_input
+                                .push_end_repetition(self.code_index());
+
+                            false
                         }
                     } else {
                         if self.node_builder_input.mismatch(Some(self.code_index())) {
