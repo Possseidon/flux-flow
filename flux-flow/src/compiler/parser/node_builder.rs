@@ -194,16 +194,25 @@ impl NodeBuilderInput {
     pub fn mismatch(&mut self, code_index_for_repetition: Option<usize>) -> bool {
         let header_index = self.header_index();
 
-        let warnings = self.elements[header_index + 1..]
+        let any_warnings = self.elements[header_index + 1..]
             .iter()
             .any(|element| element.is_warning() || element.is_repetition_error());
 
-        if warnings {
+        if any_warnings {
             if let Some(code_index) = code_index_for_repetition {
                 self.push_end_repetition(code_index);
             } else {
                 self.error();
             }
+            return false;
+        }
+
+        let any_errors = self.elements[header_index + 1..]
+            .iter()
+            .any(|element| element.is_error());
+
+        if any_errors {
+            self.error();
             return false;
         }
 
