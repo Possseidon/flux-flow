@@ -318,7 +318,7 @@ impl ParseState {
                             .push_end_repetition(self.code_index());
 
                         false
-                    } else if let TokenKind::Group(group_token) = token.kind {
+                    } else if let TokenKind::Group(GroupToken::Closing(group_token)) = token.kind {
                         if self.token_streams.contains_group(group_token.kind()) {
                             self.node_builder_input
                                 .push_end_repetition(self.code_index());
