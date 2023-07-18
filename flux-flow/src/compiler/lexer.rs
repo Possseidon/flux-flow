@@ -1,15 +1,16 @@
 use std::num::NonZeroUsize;
 
+use derive_more::From;
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TokenStream {
-    index: usize,
+    code_index: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Token {
-    pub token_kind: TokenKind,
+    pub kind: TokenKind,
     pub len: NonZeroUsize,
 }
 
@@ -25,6 +26,14 @@ pub enum LexError {
     UnterminatedChar,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LexerHints {
+    /// Since `<` and `>` can be seen as both angle brackets as well as singular tokens, this flag
+    /// can be used to hint the lexer to spit out angle bracket tokens.
+    pub prefer_angle_brackets: bool,
+    // This can theoretically also be used to allow some keywords to be used as identifiers.
+}
+
 impl TokenStream {
     /// Creates a new [`TokenStream`] referencing the given code.
     pub fn new() -> Self {
@@ -32,13 +41,13 @@ impl TokenStream {
     }
 
     /// Returns the byte offset where a [`TokenStream::next()`] call would be processed.
-    pub fn index(self) -> usize {
-        self.index
+    pub fn code_index(self) -> usize {
+        self.code_index
     }
 
     /// Returns a slice to all remaining characters that still need to be processed.
     pub fn rest(self, code: &str) -> &str {
-        &code[self.index..]
+        &code[self.code_index..]
     }
 
     /// Returns if this [`TokenStream`] reached the end of the code.
@@ -47,55 +56,17 @@ impl TokenStream {
     }
 
     /// Returns the next [`Token`] without advancing the stream.
-    pub fn peek(self, code: &str) -> Result<Option<Token>, LexError> {
+    pub fn peek(self, code: &str, hints: LexerHints) -> Result<Option<Token>, LexError> {
         let rest = self.rest(code);
         if rest.is_empty() {
             Ok(None)
-        } else if rest
-            .chars()
-            .next()
-            .as_ref()
-            .map_or(false, char::is_ascii_whitespace)
-        {
-            Ok(Some(Token {
-                token_kind: TokenKind::Whitespace,
-                len: NonZeroUsize::new(
-                    rest.find(|c: char| !c.is_ascii_whitespace())
-                        .unwrap_or(rest.len()),
-                )
-                .expect("token should not be empty"),
-            }))
+        } else if let Ok(Some(token)) = self.peek_whitespace(code) {
+            Ok(Some(token))
         } else if rest.starts_with("///") {
             Ok(Some(Token {
-                token_kind: TokenKind::DocComment,
+                kind: TokenKind::DocComment,
                 len: NonZeroUsize::new(find_line_break(rest)).expect("token should not be empty"),
             }))
-        } else if rest.starts_with("//") {
-            Ok(Some(Token {
-                token_kind: TokenKind::LineComment,
-                len: NonZeroUsize::new(find_line_break(rest)).expect("token should not be empty"),
-            }))
-        } else if let Some(mut after_line_comment) = rest.strip_prefix("/*") {
-            let mut nesting: usize = 0;
-            loop {
-                let len = after_line_comment
-                    .find("*/")
-                    .ok_or(LexError::UnterminatedComment)?;
-                if let Some(open) = after_line_comment[0..len].find("/*") {
-                    after_line_comment = &after_line_comment[(open + 2)..];
-                    nesting += 1;
-                } else {
-                    after_line_comment = &after_line_comment[(len + 2)..];
-                    if nesting == 0 {
-                        break Ok(Some(Token {
-                            token_kind: TokenKind::BlockComment,
-                            len: NonZeroUsize::new(rest.len() - after_line_comment.len())
-                                .expect("token should not be empty"),
-                        }));
-                    }
-                    nesting -= 1;
-                }
-            }
         } else if let Some(after_initial_digit) = rest.strip_prefix(|c: char| c.is_ascii_digit()) {
             if let Some(after_base) =
                 after_initial_digit.strip_prefix(['B', 'b', 'O', 'o', 'X', 'x'])
@@ -103,7 +74,7 @@ impl TokenStream {
                 let end =
                     after_base.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_');
                 Ok(Some(Token {
-                    token_kind: TokenKind::Integer,
+                    kind: TokenKind::Integer,
                     len: NonZeroUsize::new(rest.len() - end.len())
                         .expect("token should not be empty"),
                 }))
@@ -130,7 +101,7 @@ impl TokenStream {
                     .trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_');
 
                 Ok(Some(Token {
-                    token_kind,
+                    kind: token_kind,
                     len: NonZeroUsize::new(rest.len() - end.len())
                         .expect("token should not be empty"),
                 }))
@@ -171,43 +142,43 @@ impl TokenStream {
             if ident_chars < 1 || quote_after_ident {
                 let end = lex_quoted(after_ident_chars, '\'', LexError::UnterminatedChar)?;
                 Ok(Some(Token {
-                    token_kind: TokenKind::Char,
+                    kind: TokenKind::Char,
                     len: NonZeroUsize::new(rest.len() - end.len()).unwrap(),
                 }))
             } else {
                 Ok(Some(Token {
-                    token_kind: TokenKind::Label,
+                    kind: TokenKind::Label,
                     len: NonZeroUsize::new(rest.len() - after_ident_chars.len()).unwrap(),
                 }))
             }
         } else if let Some(after_quote) = rest.strip_prefix("b'") {
             let end = lex_quoted(after_quote, '\'', LexError::UnterminatedChar)?;
             Ok(Some(Token {
-                token_kind: TokenKind::Char,
+                kind: TokenKind::Char,
                 len: NonZeroUsize::new(rest.len() - end.len()).unwrap(),
             }))
         } else if let Some(after_quote) = rest.strip_prefix('"') {
             let end = lex_quoted(after_quote, '\"', LexError::UnterminatedString)?;
             Ok(Some(Token {
-                token_kind: TokenKind::String,
+                kind: TokenKind::String,
                 len: NonZeroUsize::new(rest.len() - end.len()).unwrap(),
             }))
         } else if let Some(after_quote) = rest.strip_prefix("b\"") {
             let end = lex_quoted(after_quote, '\"', LexError::UnterminatedString)?;
             Ok(Some(Token {
-                token_kind: TokenKind::String,
+                kind: TokenKind::String,
                 len: NonZeroUsize::new(rest.len() - end.len()).unwrap(),
             }))
         } else if rest.starts_with("r#") || rest.starts_with("r\"") {
             let end = lex_raw_string(&rest[1..])?;
             Ok(Some(Token {
-                token_kind: TokenKind::String,
+                kind: TokenKind::String,
                 len: NonZeroUsize::new(rest.len() - end.len()).unwrap(),
             }))
         } else if rest.starts_with("br#") || rest.starts_with("br\"") {
             let end = lex_raw_string(&rest[2..])?;
             Ok(Some(Token {
-                token_kind: TokenKind::String,
+                kind: TokenKind::String,
                 len: NonZeroUsize::new(rest.len() - end.len()).unwrap(),
             }))
         } else if rest.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
@@ -220,46 +191,99 @@ impl TokenStream {
                 Ok(Some(keyword))
             } else {
                 Ok(Some(Token {
-                    token_kind: TokenKind::Ident,
+                    kind: TokenKind::Ident,
                     len,
                 }))
             }
         } else if let Some(token) = self.punctuation_token(code) {
             Ok(Some(token))
         } else {
-            self.ascii_token(code).map(Some)
+            self.ascii_token(code, hints.prefer_angle_brackets)
+                .map(Some)
+        }
+    }
+
+    /// Returns the next [`Token`], but only if it is a whitespace token.
+    pub fn peek_whitespace(&self, code: &str) -> Result<Option<Token>, LexError> {
+        let rest = self.rest(code);
+        if rest.is_empty() {
+            Ok(None)
+        } else if rest
+            .chars()
+            .next()
+            .as_ref()
+            .map_or(false, char::is_ascii_whitespace)
+        {
+            Ok(Some(Token {
+                kind: WhitespaceToken::Whitespace.into(),
+                len: NonZeroUsize::new(
+                    rest.find(|c: char| !c.is_ascii_whitespace())
+                        .unwrap_or(rest.len()),
+                )
+                .expect("token should not be empty"),
+            }))
+        } else if rest.starts_with("///") {
+            Ok(None)
+        } else if rest.starts_with("//") {
+            Ok(Some(Token {
+                kind: WhitespaceToken::LineComment.into(),
+                len: NonZeroUsize::new(find_line_break(rest)).expect("token should not be empty"),
+            }))
+        } else if let Some(mut after_line_comment) = rest.strip_prefix("/*") {
+            let mut nesting: usize = 0;
+            loop {
+                let len = after_line_comment
+                    .find("*/")
+                    .ok_or(LexError::UnterminatedComment)?;
+                if let Some(open) = after_line_comment[0..len].find("/*") {
+                    after_line_comment = &after_line_comment[open + 2..];
+                    nesting += 1;
+                } else {
+                    after_line_comment = &after_line_comment[len + 2..];
+                    if nesting == 0 {
+                        break Ok(Some(Token {
+                            kind: WhitespaceToken::BlockComment.into(),
+                            len: NonZeroUsize::new(rest.len() - after_line_comment.len())
+                                .expect("token should not be empty"),
+                        }));
+                    }
+                    nesting -= 1;
+                }
+            }
+        } else {
+            Ok(None)
         }
     }
 
     /// Skips over all consecutive whitespace tokens, returning the number of skipped bytes.
     pub fn skip_whitespace_tokens(&mut self, code: &str) -> usize {
-        let before = self.index;
+        let before = self.code_index;
         // TODO: use && is_whitespace_token(token.token_kind) once stabilized
-        while let Ok(Some(token)) = self.peek(code) {
-            if !is_whitespace_token(token.token_kind) {
+        while let Ok(Some(token)) = self.peek_whitespace(code) {
+            if !token.kind.is_whitespace() {
                 break;
             }
             self.advance_token(token);
         }
-        self.index - before
+        self.code_index - before
     }
 
     /// Advances over the given token, returning the number of advanced bytes.
     pub fn advance_token(&mut self, token: Token) -> NonZeroUsize {
-        self.index += token.len.get();
+        self.code_index += token.len.get();
         token.len
     }
 
     /// Advances over the given error, returning the number of advanced bytes.
     pub fn advance_error(&mut self, code: &str, error: &LexError) -> NonZeroUsize {
-        let old_index = self.index;
+        let old_index = self.code_index;
         match error {
-            LexError::InvalidToken(char) => self.index += char.len_utf8(),
+            LexError::InvalidToken(char) => self.code_index += char.len_utf8(),
             LexError::UnterminatedComment
             | LexError::UnterminatedString
-            | LexError::UnterminatedChar => self.index = code.len(),
+            | LexError::UnterminatedChar => self.code_index = code.len(),
         };
-        NonZeroUsize::new(self.index - old_index).expect("error should have advanced")
+        NonZeroUsize::new(self.code_index - old_index).expect("error should have advanced")
     }
 
     fn keyword_token(self, ident: &str) -> Option<Token> {
@@ -267,7 +291,7 @@ impl TokenStream {
             ( $( $string:literal => $TK:ident, )* ) => {
                 $( if ident == $string {
                     const LEN: NonZeroUsize = new_non_zero_usize::<{ $string.len() }>();
-                    Some(Token { token_kind: TokenKind::$TK, len: LEN })
+                    Some(Token { kind: KeywordToken::$TK.into(), len: LEN })
                 } else )+ {
                     None
                 }
@@ -275,7 +299,6 @@ impl TokenStream {
         }
 
         tokens! {
-            "_" => Underscore,
             "as" => As,
             "break" => Break,
             "continue" => Continue,
@@ -312,7 +335,7 @@ impl TokenStream {
             ( $( $string:literal => $TK:ident, )* ) => {
                 $( if current.starts_with($string) {
                     const LEN: NonZeroUsize = new_non_zero_usize::<{ $string.len() }>();
-                    Some(Token { token_kind: TokenKind::$TK, len: LEN })
+                    Some(Token { kind: PunctuationToken::$TK.into(), len: LEN })
                 } else )+ {
                     None
                 }
@@ -349,23 +372,14 @@ impl TokenStream {
         }
     }
 
-    fn ascii_token(self, code: &str) -> Result<Token, LexError> {
+    fn ascii_token(self, code: &str, prefer_angle_brackets: bool) -> Result<Token, LexError> {
         let char = self.rest(code).chars().next().expect("should not be empty");
-        if let Ok(ascii_char) = u8::try_from(char) {
-            if ascii_char > b' ' {
-                if let Some(token_kind) = TOKEN_MAP
-                    .get((ascii_char - b' ' - 1) as usize)
-                    .copied()
-                    .unwrap_or(None)
-                {
-                    return Ok(Token {
-                        token_kind,
-                        len: new_non_zero_usize::<1>(),
-                    });
-                }
-            }
-        }
-        Err(LexError::InvalidToken(char))
+        Ok(Token {
+            kind: ascii_token(char, prefer_angle_brackets)
+                .ok_or(LexError::InvalidToken(char))?
+                .into(),
+            len: new_non_zero_usize::<1>(),
+        })
     }
 }
 
@@ -421,13 +435,6 @@ fn find_line_break(current: &str) -> usize {
     }
 }
 
-fn is_whitespace_token(token_kind: TokenKind) -> bool {
-    matches!(
-        token_kind,
-        TokenKind::Whitespace | TokenKind::LineComment | TokenKind::BlockComment
-    )
-}
-
 const fn new_non_zero_usize<const VALUE: usize>() -> NonZeroUsize {
     if let Some(value) = NonZeroUsize::new(VALUE) {
         value
@@ -437,352 +444,521 @@ const fn new_non_zero_usize<const VALUE: usize>() -> NonZeroUsize {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BraceKind {
+pub enum GroupKind {
     Paren,
     Brack,
     Curly,
+    Angle,
 }
 
-impl BraceKind {
-    pub fn from_brace_index(index: BraceIndex) -> Option<Self> {
-        match index {
-            braces::BRACE_PAREN => Some(BraceKind::Paren),
-            braces::BRACE_BRACK => Some(BraceKind::Brack),
-            braces::BRACE_CURLY => Some(BraceKind::Curly),
-            _ => None,
-        }
-    }
-
+impl GroupKind {
     pub fn name(self) -> &'static str {
         match self {
-            Self::Paren => "`()`",
-            Self::Brack => "`[]`",
-            Self::Curly => "`{}`",
+            Self::Paren => "`(...)`",
+            Self::Brack => "`[...]`",
+            Self::Curly => "`{ ... }`", // {} blocks usually have whitespace like that
+            Self::Angle => "`<...>`",
         }
     }
 
     pub fn opening_name(self) -> &'static str {
-        match self {
-            Self::Paren => "`(`",
-            Self::Brack => "`[`",
-            Self::Curly => "`{`",
-        }
+        self.opening_token().name()
     }
 
     pub fn closing_name(self) -> &'static str {
+        self.closing_token().name()
+    }
+
+    pub fn opening_token(&self) -> OpeningToken {
         match self {
-            Self::Paren => "`)`",
-            Self::Brack => "`]`",
-            Self::Curly => "`}`",
+            Self::Paren => OpeningToken::Paren,
+            Self::Brack => OpeningToken::Brack,
+            Self::Curly => OpeningToken::Curly,
+            Self::Angle => OpeningToken::Angle,
         }
     }
 
-    pub fn opening_token(&self) -> TokenKind {
+    pub fn closing_token(&self) -> ClosingToken {
         match self {
-            Self::Paren => TokenKind::LParen,
-            Self::Brack => TokenKind::LBrack,
-            Self::Curly => TokenKind::LCurly,
+            Self::Paren => ClosingToken::Paren,
+            Self::Brack => ClosingToken::Brack,
+            Self::Curly => ClosingToken::Curly,
+            Self::Angle => ClosingToken::Angle,
         }
     }
-
-    pub fn closing_token(&self) -> TokenKind {
-        match self {
-            Self::Paren => TokenKind::RParen,
-            Self::Brack => TokenKind::RBrack,
-            Self::Curly => TokenKind::RCurly,
-        }
-    }
-}
-
-pub type BraceIndex = u8;
-
-pub mod braces {
-    // TODO: constants were only necessary for const generics, which are no longer in use
-    pub const BRACE_PAREN: u8 = 0;
-    pub const BRACE_BRACK: u8 = 1;
-    pub const BRACE_CURLY: u8 = 2;
 }
 
 macro_rules! tokens {
-    ( $( $Variant:ident($TK:ident) = $name:literal, )* ) => {
-        pub type TokenIndex = u8;
-
+    ( $( $( #[$attr:meta] )* enum $T:ident { $( $Variant:ident = $name:literal, )* } )* ) => { $(
+        $( #[$attr] )*
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        pub enum TokenKind {
+        pub enum $T {
             $( $Variant, )*
         }
 
-        impl TokenKind {
-            pub fn from_token_index(index: TokenIndex) -> Option<Self> {
-                match index {
-                    $( tokens::$TK => Some(Self::$Variant), )*
-                    _ => None,
-                }
-            }
-
+        impl $T {
             pub fn name(self) -> &'static str {
                 match self {
                     $( Self::$Variant => $name, )*
                 }
             }
         }
-
-        pub mod tokens {
-            use super::{TokenKind, TokenIndex};
-
-            $( pub const $TK: TokenIndex = TokenKind::$Variant as TokenIndex; )*
-        }
-    };
+    )* };
 }
 
 tokens! {
-    // TODO: constants were only necessary for const generics, which are no longer in use
-    Whitespace(TK_WHITESPACE) = "whitespace",
-    LineComment(TK_LINE_COMMENT) = "line comment",
-    BlockComment(TK_BLOCK_COMMENT) = "block comment",
-    DocComment(TK_DOC_COMMENT) = "doc comment",
 
-    Ident(TK_IDENT) = "identifier",
-    Integer(TK_INTEGER) = "integer",
-    Float(TK_FLOAT) = "float",
-    String(TK_STRING) = "string",
-    Char(TK_CHAR) = "char",
-    Label(TK_LABEL) = "label",
-
-    LParen(TK_L_PAREN) = "`(`",
-    RParen(TK_R_PAREN) = "`)`",
-    LBrack(TK_L_BRACK) = "`[`",
-    RBrack(TK_R_BRACK) = "`]`",
-    LCurly(TK_L_CURLY) = "`{`",
-    RCurly(TK_R_CURLY) = "`}`",
-    Plus(TK_PLUS) = "`+`",
-    Minus(TK_MINUS) = "`-`",
-    Star(TK_STAR) = "`*`",
-    Slash(TK_SLASH) = "`/`",
-    Percent(TK_PERCENT) = "`%`",
-    Caret(TK_CARET) = "`^`",
-    Not(TK_NOT) = "`!`",
-    And(TK_AND) = "`&`",
-    Or(TK_OR) = "`|`",
-    AndAnd(TK_AND_AND) = "`&&`",
-    OrOr(TK_OR_OR) = "`||`",
-    Shl(TK_SHL) = "`<<`",
-    Shr(TK_SHR) = "`>>`",
-    PlusEq(TK_PLUS_EQ) = "`+=`",
-    MinusEq(TK_MINUS_EQ) = "`-=`",
-    StarEq(TK_STAR_EQ) = "`*=`",
-    SlashEq(TK_SLASH_EQ) = "`/=`",
-    PercentEq(TK_PERCENT_EQ) = "`%=`",
-    CaretEq(TK_CARET_EQ) = "`^=`",
-    AndEq(TK_AND_EQ) = "`&=`",
-    OrEq(TK_OR_EQ) = "`|=`",
-    ShlEq(TK_SHL_EQ) = "`<<=`",
-    ShrEq(TK_SHR_EQ) = "`>>=`",
-    Eq(TK_EQ) = "`=`",
-    EqEq(TK_EQ_EQ) = "`==`",
-    Ne(TK_NE) = "`!=`",
-    Gt(TK_GT) = "`>`",
-    Lt(TK_LT) = "`<`",
-    Ge(TK_GE) = "`>=`",
-    Le(TK_LE) = "`<=`",
-    At(TK_AT) = "`@`",
-    Underscore(TK_UNDERSCORE) = "`_`",
-    Dot(TK_DOT) = "`.`",
-    DotDot(TK_DOT_DOT) = "`..`",
-    DotEq(TK_DOT_EQ) = "`.=`",
-    DotDotDot(TK_DOT_DOT_DOT) = "`...`",
-    DotDotEq(TK_DOT_DOT_EQ) = "`..=`",
-    Comma(TK_COMMA) = "`,`",
-    Semi(TK_SEMI) = "`;`",
-    Colon(TK_COLON) = "`:`",
-    PathSep(TK_PATH_SEP) = "`::`",
-    RArrow(TK_R_ARROW) = "`->`",
-    FatArrow(TK_FAT_ARROW) = "`=>`",
-    Pound(TK_POUND) = "`#`",
-    Dollar(TK_DOLLAR) = "`$`",
-    Question(TK_QUESTION) = "`?`",
-    Tilde(TK_TILDE) = "`~`",
-
-    As(KW_AS) = "`as`",
-    Break(KW_BREAK) = "`break`",
-    Continue(KW_CONTINUE) = "`continue`",
-    Crate(KW_CRATE) = "`crate`",
-    Else(KW_ELSE) = "`else`",
-    False(KW_FALSE) = "`false`",
-    Fn(KW_FN) = "`fn`",
-    For(KW_FOR) = "`for`",
-    If(KW_IF) = "`if`",
-    Impl(KW_IMPL) = "`impl`",
-    In(KW_IN) = "`in`",
-    Let(KW_LET) = "`let`",
-    Loop(KW_LOOP) = "`loop`",
-    Match(KW_MATCH) = "`match`",
-    Mod(KW_MOD) = "`mod`",
-    Pub(KW_PUB) = "`pub`",
-    Return(KW_RETURN) = "`return`",
-    SelfValue(KW_SELF_VALUE) = "`self`",
-    SelfType(KW_SELF_TYPE) = "`Self`",
-    Struct(KW_STRUCT) = "`struct`",
-    Super(KW_SUPER) = "`super`",
-    Trait(KW_TRAIT) = "`trait`",
-    True(KW_TRUE) = "`true`",
-    Type(KW_TYPE) = "`type`",
-    Use(KW_USE) = "`use`",
-    While(KW_WHILE) = "`while`",
+/// Tokens that are considered whitespace.
+///
+/// This includes both actual whitespace as well as line and block comments.
+/// Doc comments are not considered whitespace.
+enum WhitespaceToken {
+    Whitespace = "whitespace",
+    LineComment = "line comment",
+    BlockComment = "block comment",
 }
 
-pub const TOKEN_MAP: &[Option<TokenKind>] = &[
-    Some(TokenKind::Not),
-    None, // "
-    Some(TokenKind::Pound),
-    Some(TokenKind::Dollar),
-    Some(TokenKind::Percent),
-    Some(TokenKind::And),
-    None, // '
-    Some(TokenKind::LParen),
-    Some(TokenKind::RParen),
-    Some(TokenKind::Star),
-    Some(TokenKind::Plus),
-    Some(TokenKind::Comma),
-    Some(TokenKind::Minus),
-    Some(TokenKind::Dot),
-    Some(TokenKind::Slash),
-    None, // 0
-    None, // 1
-    None, // 2
-    None, // 3
-    None, // 4
-    None, // 5
-    None, // 6
-    None, // 7
-    None, // 8
-    None, // 9
-    Some(TokenKind::Colon),
-    Some(TokenKind::Semi),
-    Some(TokenKind::Lt),
-    Some(TokenKind::Eq),
-    Some(TokenKind::Gt),
-    Some(TokenKind::Question),
-    Some(TokenKind::At),
-    None, // A
-    None, // B
-    None, // C
-    None, // D
-    None, // E
-    None, // F
-    None, // G
-    None, // H
-    None, // I
-    None, // J
-    None, // K
-    None, // L
-    None, // M
-    None, // N
-    None, // O
-    None, // P
-    None, // Q
-    None, // R
-    None, // S
-    None, // T
-    None, // U
-    None, // V
-    None, // W
-    None, // X
-    None, // Y
-    None, // Z
-    Some(TokenKind::LBrack),
-    None, // \
-    Some(TokenKind::RBrack),
-    Some(TokenKind::Caret),
-    Some(TokenKind::Underscore),
-    None, // `
-    None, // A
-    None, // B
-    None, // C
-    None, // D
-    None, // E
-    None, // F
-    None, // G
-    None, // H
-    None, // I
-    None, // J
-    None, // K
-    None, // L
-    None, // M
-    None, // N
-    None, // O
-    None, // P
-    None, // Q
-    None, // R
-    None, // S
-    None, // T
-    None, // U
-    None, // V
-    None, // W
-    None, // X
-    None, // Y
-    None, // Z
-    Some(TokenKind::LCurly),
-    Some(TokenKind::Or),
-    Some(TokenKind::RCurly),
-    Some(TokenKind::Tilde),
-];
+/// Punctuation tokens that are made up out of possibly multiple punctuation characters.
+enum PunctuationToken {
+    Plus = "`+`",
+    Minus = "`-`",
+    Star = "`*`",
+    Slash = "`/`",
+    Percent = "`%`",
+    Caret = "`^`",
+    Not = "`!`",
+    And = "`&`",
+    Or = "`|`",
+    AndAnd = "`&&`",
+    OrOr = "`||`",
+    Shl = "`<<`",
+    Shr = "`>>`",
+    PlusEq = "`+=`",
+    MinusEq = "`-=`",
+    StarEq = "`*=`",
+    SlashEq = "`/=`",
+    PercentEq = "`%=`",
+    CaretEq = "`^=`",
+    AndEq = "`&=`",
+    OrEq = "`|=`",
+    ShlEq = "`<<=`",
+    ShrEq = "`>>=`",
+    Eq = "`=`",
+    EqEq = "`==`",
+    Ne = "`!=`",
+    Gt = "`>`",
+    Lt = "`<`",
+    Ge = "`>=`",
+    Le = "`<=`",
+    At = "`@`",
+    Dot = "`.`",
+    DotDot = "`..`",
+    DotEq = "`.=`",
+    DotDotDot = "`...`",
+    DotDotEq = "`..=`",
+    Comma = "`,`",
+    Semi = "`;`",
+    Colon = "`:`",
+    PathSep = "`::`",
+    RArrow = "`->`",
+    FatArrow = "`=>`",
+    Pound = "`#`",
+    Dollar = "`$`",
+    Question = "`?`",
+    Tilde = "`~`",
+}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Group tokens that open a group.
+enum OpeningToken {
+    Paren = "`(`",
+    Brack = "`[`",
+    Curly = "`{`",
+    Angle = "`<`",
+}
 
-    fn assert_empty(code: &str, token_stream: TokenStream) {
-        let Ok(None) = token_stream.peek(code) else {
-            panic!("token stream should be empty")
-        };
-    }
+/// Group tokens that close a group.
+enum ClosingToken {
+    Paren = "`)`",
+    Brack = "`]`",
+    Curly = "`}`",
+    Angle = "`>`",
+}
 
-    fn assert_token_and_advance(code: &str, token_stream: &mut TokenStream) -> Token {
-        let index_before = token_stream.index;
+}
 
-        let Ok(Some(token)) = token_stream.peek(code) else {
-            panic!("token expected")
-        };
-
-        let advanced = token_stream.advance_token(token);
-        assert_eq!(advanced, token.len);
-        assert_eq!(token_stream.index, index_before + advanced.get());
-
-        token
-    }
-
-    #[test]
-    fn token_stream_initial_state() {
-        let token_stream = TokenStream::new();
-
-        assert_eq!(token_stream.index, 0);
-    }
-
-    #[test]
-    fn token_stream_empty() {
-        let code = "";
-        let token_stream = TokenStream::new();
-
-        assert_empty(code, token_stream);
-    }
-
-    #[test]
-    fn token_stream_with_ident() {
-        let code = "test";
-        let mut token_stream = TokenStream::new();
-
-        let token = assert_token_and_advance(code, &mut token_stream);
-
-        const LEN: NonZeroUsize = new_non_zero_usize::<4>();
-        assert!(matches!(
-            token,
-            Token {
-                len: LEN,
-                token_kind: TokenKind::Ident
-            },
-        ));
-
-        assert_empty(code, token_stream);
+impl OpeningToken {
+    pub fn kind(self) -> GroupKind {
+        match self {
+            OpeningToken::Paren => GroupKind::Paren,
+            OpeningToken::Brack => GroupKind::Brack,
+            OpeningToken::Curly => GroupKind::Curly,
+            OpeningToken::Angle => GroupKind::Angle,
+        }
     }
 }
+
+impl ClosingToken {
+    pub fn kind(self) -> GroupKind {
+        match self {
+            ClosingToken::Paren => GroupKind::Paren,
+            ClosingToken::Brack => GroupKind::Brack,
+            ClosingToken::Curly => GroupKind::Curly,
+            ClosingToken::Angle => GroupKind::Angle,
+        }
+    }
+}
+
+/// Group tokens like opening and closing braces, parentheses, etc...
+#[derive(Clone, Copy, Debug, PartialEq, Eq, From)]
+pub enum GroupToken {
+    Opening(OpeningToken),
+    Closing(ClosingToken),
+}
+
+impl GroupToken {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Opening(opening) => opening.name(),
+            Self::Closing(closing) => closing.name(),
+        }
+    }
+
+    pub fn kind(self) -> GroupKind {
+        match self {
+            Self::Opening(opening) => opening.kind(),
+            Self::Closing(closing) => closing.kind(),
+        }
+    }
+
+    pub fn is_opening(&self) -> bool {
+        matches!(self, Self::Opening(_))
+    }
+
+    pub fn is_closing(&self) -> bool {
+        matches!(self, Self::Closing(_))
+    }
+}
+
+tokens! {
+
+/// Keywords that have special meaning.
+///
+/// Keywords have a distinct difference from punctuation tokens: They would be valid identifiers.
+/// That is also the reason why `_` is considered a keyword token and not a punctuation token.
+enum KeywordToken {
+    As = "`as`",
+    Break = "`break`",
+    Continue = "`continue`",
+    Crate = "`crate`",
+    Else = "`else`",
+    False = "`false`",
+    Fn = "`fn`",
+    For = "`for`",
+    If = "`if`",
+    Impl = "`impl`",
+    In = "`in`",
+    Let = "`let`",
+    Loop = "`loop`",
+    Match = "`match`",
+    Mod = "`mod`",
+    Pub = "`pub`",
+    Return = "`return`",
+    SelfValue = "`self`",
+    SelfType = "`Self`",
+    Struct = "`struct`",
+    Super = "`super`",
+    Trait = "`trait`",
+    True = "`true`",
+    Type = "`type`",
+    Underscore = "`_`",
+    Use = "`use`",
+    While = "`while`",
+}
+
+}
+
+/// All possible token kinds that the lexer can produce.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, From)]
+pub enum TokenKind {
+    Whitespace(WhitespaceToken),
+    DocComment,
+    Ident,
+    Integer,
+    Float,
+    String,
+    Char,
+    Label,
+    Punctuation(PunctuationToken),
+    Group(GroupToken),
+    Keyword(KeywordToken),
+}
+
+impl TokenKind {
+    /// Whether the token is whitespace. This includes line and block comments.
+    fn is_whitespace(self) -> bool {
+        matches!(self, Self::Whitespace(_))
+    }
+
+    /// A human readable name for the token; useful for error messages.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Whitespace(token) => token.name(),
+            Self::DocComment => "doc comment",
+            Self::Integer => "integer",
+            Self::Float => "float",
+            Self::String => "string",
+            Self::Char => "char",
+            Self::Ident => "identifier",
+            Self::Label => "label",
+            Self::Punctuation(token) => token.name(),
+            Self::Group(token) => token.name(),
+            Self::Keyword(token) => token.name(),
+        }
+    }
+}
+
+/// Tokens that can be used in a grammar.
+///
+/// Excludes both whitespace and group tokens, as those have special handling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, From)]
+pub enum GrammarToken {
+    DocComment,
+    Ident,
+    Integer,
+    Float,
+    String,
+    Char,
+    Label,
+    Punctuation(PunctuationToken),
+    Keyword(KeywordToken),
+}
+
+impl GrammarToken {
+    pub fn name(&self) -> &str {
+        TokenKind::from(*self).name()
+    }
+}
+
+impl From<GrammarToken> for TokenKind {
+    fn from(value: GrammarToken) -> Self {
+        match value {
+            GrammarToken::DocComment => Self::DocComment,
+            GrammarToken::Ident => Self::Ident,
+            GrammarToken::Integer => Self::Integer,
+            GrammarToken::Float => Self::Float,
+            GrammarToken::String => Self::String,
+            GrammarToken::Char => Self::Char,
+            GrammarToken::Label => Self::Label,
+            GrammarToken::Punctuation(token) => Self::Punctuation(token),
+            GrammarToken::Keyword(token) => Self::Keyword(token),
+        }
+    }
+}
+
+/// Tokens that are either punctuation or group tokens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, From)]
+pub enum AsciiToken {
+    Punctuation(PunctuationToken),
+    Group(GroupToken),
+}
+
+impl From<AsciiToken> for TokenKind {
+    fn from(value: AsciiToken) -> Self {
+        match value {
+            AsciiToken::Punctuation(token) => Self::Punctuation(token),
+            AsciiToken::Group(token) => Self::Group(token),
+        }
+    }
+}
+
+impl From<OpeningToken> for TokenKind {
+    fn from(value: OpeningToken) -> Self {
+        Self::Group(GroupToken::Opening(value))
+    }
+}
+
+impl From<ClosingToken> for TokenKind {
+    fn from(value: ClosingToken) -> Self {
+        Self::Group(GroupToken::Closing(value))
+    }
+}
+
+/// Turns a char into an ascii token, that is, a punctuation or group token.
+pub fn ascii_token(char: char, prefer_angle_brackets: bool) -> Option<AsciiToken> {
+    const fn token_map(prefer_angle_brackets: bool) -> [Option<AsciiToken>; 94] {
+        [
+            Some(AsciiToken::Punctuation(PunctuationToken::Not)),
+            None, // "
+            Some(AsciiToken::Punctuation(PunctuationToken::Pound)),
+            Some(AsciiToken::Punctuation(PunctuationToken::Dollar)),
+            Some(AsciiToken::Punctuation(PunctuationToken::Percent)),
+            Some(AsciiToken::Punctuation(PunctuationToken::And)),
+            None, // '
+            Some(AsciiToken::Group(GroupToken::Opening(OpeningToken::Paren))),
+            Some(AsciiToken::Group(GroupToken::Closing(ClosingToken::Paren))),
+            Some(AsciiToken::Punctuation(PunctuationToken::Star)),
+            Some(AsciiToken::Punctuation(PunctuationToken::Plus)),
+            Some(AsciiToken::Punctuation(PunctuationToken::Comma)),
+            Some(AsciiToken::Punctuation(PunctuationToken::Minus)),
+            Some(AsciiToken::Punctuation(PunctuationToken::Dot)),
+            Some(AsciiToken::Punctuation(PunctuationToken::Slash)),
+            None, // 0
+            None, // 1
+            None, // 2
+            None, // 3
+            None, // 4
+            None, // 5
+            None, // 6
+            None, // 7
+            None, // 8
+            None, // 9
+            Some(AsciiToken::Punctuation(PunctuationToken::Colon)),
+            Some(AsciiToken::Punctuation(PunctuationToken::Semi)),
+            Some(if prefer_angle_brackets {
+                AsciiToken::Group(GroupToken::Opening(OpeningToken::Angle))
+            } else {
+                AsciiToken::Punctuation(PunctuationToken::Lt)
+            }),
+            Some(AsciiToken::Punctuation(PunctuationToken::Eq)),
+            Some(if prefer_angle_brackets {
+                AsciiToken::Group(GroupToken::Closing(ClosingToken::Angle))
+            } else {
+                AsciiToken::Punctuation(PunctuationToken::Gt)
+            }),
+            Some(AsciiToken::Punctuation(PunctuationToken::Question)),
+            Some(AsciiToken::Punctuation(PunctuationToken::At)),
+            None, // A
+            None, // B
+            None, // C
+            None, // D
+            None, // E
+            None, // F
+            None, // G
+            None, // H
+            None, // I
+            None, // J
+            None, // K
+            None, // L
+            None, // M
+            None, // N
+            None, // O
+            None, // P
+            None, // Q
+            None, // R
+            None, // S
+            None, // T
+            None, // U
+            None, // V
+            None, // W
+            None, // X
+            None, // Y
+            None, // Z
+            Some(AsciiToken::Group(GroupToken::Opening(OpeningToken::Brack))),
+            None, // \
+            Some(AsciiToken::Group(GroupToken::Closing(ClosingToken::Brack))),
+            Some(AsciiToken::Punctuation(PunctuationToken::Caret)),
+            None, // _
+            None, // `
+            None, // A
+            None, // B
+            None, // C
+            None, // D
+            None, // E
+            None, // F
+            None, // G
+            None, // H
+            None, // I
+            None, // J
+            None, // K
+            None, // L
+            None, // M
+            None, // N
+            None, // O
+            None, // P
+            None, // Q
+            None, // R
+            None, // S
+            None, // T
+            None, // U
+            None, // V
+            None, // W
+            None, // X
+            None, // Y
+            None, // Z
+            Some(AsciiToken::Group(GroupToken::Opening(OpeningToken::Curly))),
+            Some(AsciiToken::Punctuation(PunctuationToken::Or)),
+            Some(AsciiToken::Group(GroupToken::Closing(ClosingToken::Curly))),
+            Some(AsciiToken::Punctuation(PunctuationToken::Tilde)),
+        ]
+    }
+
+    const TOKEN_MAP_NORMAL: &[Option<AsciiToken>] = &token_map(false);
+    const TOKEN_MAP_ANGLE_BRACK: &[Option<AsciiToken>] = &token_map(true);
+
+    let token_map = if prefer_angle_brackets {
+        TOKEN_MAP_ANGLE_BRACK
+    } else {
+        TOKEN_MAP_NORMAL
+    };
+
+    *token_map.get(u8::try_from(char).ok()?.checked_sub(b'!')? as usize)?
+}
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+
+//     fn assert_empty(code: &str, token_stream: TokenStream) {
+//         let Ok(None) = token_stream.peek(code) else {
+//             panic!("token stream should be empty")
+//         };
+//     }
+
+//     fn assert_token_and_advance(code: &str, token_stream: &mut TokenStream) -> Token {
+//         let index_before = token_stream.index;
+
+//         let Ok(Some(token)) = token_stream.peek(code) else {
+//             panic!("token expected")
+//         };
+
+//         let advanced = token_stream.advance_token(token);
+//         assert_eq!(advanced, token.len);
+//         assert_eq!(token_stream.index, index_before + advanced.get());
+
+//         token
+//     }
+
+//     #[test]
+//     fn token_stream_initial_state() {
+//         let token_stream = TokenStream::new();
+
+//         assert_eq!(token_stream.index, 0);
+//     }
+
+//     #[test]
+//     fn token_stream_empty() {
+//         let code = "";
+//         let token_stream = TokenStream::new();
+
+//         assert_empty(code, token_stream);
+//     }
+
+//     #[test]
+//     fn token_stream_with_ident() {
+//         let code = "test";
+//         let mut token_stream = TokenStream::new();
+
+//         let token = assert_token_and_advance(code, &mut token_stream);
+
+//         const LEN: NonZeroUsize = new_non_zero_usize::<4>();
+//         assert!(matches!(
+//             token,
+//             Token {
+//                 len: LEN,
+//                 kind: TokenKind::Ident
+//             },
+//         ));
+
+//         assert_empty(code, token_stream);
+//     }
+// }
