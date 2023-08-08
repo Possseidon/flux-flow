@@ -32,6 +32,8 @@ pub struct LexerHints {
     /// can be used to hint the lexer to spit out angle bracket tokens.
     pub prefer_angle_brackets: bool,
     // This can theoretically also be used to allow some keywords to be used as identifiers.
+    // And also to distinguish `||` between "or" and an empty lambda parameter list, which might
+    // have spaces between the pipes.
 }
 
 impl TokenStream {
