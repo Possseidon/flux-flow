@@ -187,7 +187,7 @@ enum TypeFlag {
     /// This is one of the special flags that don't directly correspond to actual values.
     Complement,
 
-    /// Wraps the original type in a single element list.
+    /// Wraps the original type in a zero-to-one element list.
     ///
     /// Used as an optimization to avoid going through [`TypeConstraint`].
     ///
