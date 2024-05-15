@@ -1,5 +1,4 @@
 use std::{
-    cmp::Reverse,
     collections::{BTreeMap, BTreeSet},
     convert::identity,
     num::{NonZeroU64, NonZeroU8},
@@ -7,6 +6,7 @@ use std::{
 };
 
 use enumset::{enum_set, EnumSet, EnumSetType};
+use itertools::{merge_join_by, EitherOrBoth, Itertools};
 use malachite::{Natural, Rational};
 use ordered_float::NotNan;
 
@@ -20,6 +20,7 @@ use ordered_float::NotNan;
 #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StaticType {
     flags: EnumSet<TypeFlag>,
+    /// Sorted and unique by [`TypeConstraint::kind`].
     constraints: Option<Arc<Vec<TypeConstraint>>>,
 }
 
@@ -107,6 +108,13 @@ impl StaticType {
         other.is_superset(self)
     }
 
+    /// Returns a type that allows values that are allowed by either of the two types.
+    pub fn union(self, other: Self) -> Self {
+        self.complement()
+            .intersection(other.complement())
+            .complement()
+    }
+
     /// Returns a type that only allows values that are allowed by both types.
     pub fn intersection(self, other: Self) -> Self {
         let lhs = self.unoptimize_optional();
@@ -115,22 +123,15 @@ impl StaticType {
             lhs.flags.contains(TypeFlag::Complement),
             rhs.flags.contains(TypeFlag::Complement),
         ) {
-            (false, false) => lhs.raw_intersection(rhs),
-            (false, true) => lhs.raw_difference(rhs.complement()),
-            (true, false) => rhs.raw_difference(lhs.complement()),
             (true, true) => lhs.complement().raw_union(rhs.complement()),
+            (true, false) => rhs.raw_difference(lhs.complement()),
+            (false, true) => lhs.raw_difference(rhs.complement()),
+            (false, false) => lhs.raw_intersection(rhs),
         }
         .optimize_optional()
     }
 
-    /// Returns a type that allows values that are allowed by either of the two types.
-    pub fn union(self, other: Self) -> Self {
-        self.complement()
-            .intersection(other.complement())
-            .complement()
-    }
-
-    /// Returns a type that allows all values of `self` except those allowed by `other`.
+    /// Returns a type that allows the same values except those in `other`.
     pub fn difference(self, other: Self) -> Self {
         self.intersection(other.complement())
     }
@@ -243,51 +244,116 @@ impl StaticType {
         self.constraints.map_or_else(Vec::new, Arc::unwrap_or_clone)
     }
 
-    /// Performs an intersection on [raw](Self::is_raw) types.
+    fn filter_constraints(self, flags: EnumSet<TypeFlag>) -> impl Iterator<Item = TypeConstraint> {
+        self.into_constraints()
+            .into_iter()
+            .filter(move |constraint| flags.contains(constraint.flag()))
+    }
+
+    /// Returns the union of two [raw](Self::is_raw) [`StaticType`]s.
+    ///
+    /// Panics if one of the types is not raw.
+    fn raw_union(self, other: Self) -> Self {
+        self.raw_merge_into_superset(other, TypeConstraint::union)
+    }
+
+    /// Returns the intersection of two [raw](Self::is_raw) [`StaticType`]s.
     ///
     /// Panics if one of the types is not raw.
     fn raw_intersection(self, other: Self) -> Self {
+        self.raw_merge_into_subset(other, TypeConstraint::intersection)
+    }
+
+    /// Returns the difference of two [raw](Self::is_raw) [`StaticType`]s.
+    ///
+    /// Panics if one of the types is not raw.
+    fn raw_difference(self, other: Self) -> Self {
+        self.raw_merge_into_subset(other, TypeConstraint::difference)
+    }
+
+    /// Merges two [raw](Self::is_raw) [`StaticType`]s into a superset.
+    ///
+    /// `merge` should be [`TypeConstraint::union`].
+    ///
+    /// Panics if one of the types is not raw.
+    fn raw_merge_into_superset(
+        self,
+        other: Self,
+        merge: impl Fn(TypeConstraint, TypeConstraint) -> Option<TypeConstraint>,
+    ) -> Self {
         assert!(self.is_raw());
         assert!(other.is_raw());
 
         let flags = self.flags.intersection(other.flags);
-        // if constraints turn into "never"
-        // - remove constraint
-        // - clear corresponding flag
-
-        todo!();
+        Self::with_constraints(
+            flags,
+            merge_join_by(
+                self.filter_constraints(flags),
+                other.filter_constraints(flags),
+                |left, right| left.kind().cmp(&right.kind()),
+            )
+            .flat_map(|either_or_both| match either_or_both {
+                EitherOrBoth::Both(left, right) => merge(left, right),
+                EitherOrBoth::Left(constraint) | EitherOrBoth::Right(constraint) => {
+                    Some(constraint)
+                }
+            })
+            .collect_vec(),
+        )
     }
 
-    /// Performs a union on [raw](Self::is_raw) types.
+    /// Merges two [raw](Self::is_raw) [`StaticType`]s into a subset.
+    ///
+    /// `merge` should be [`TypeConstraint::intersection`] or [`TypeConstraint::difference`].
     ///
     /// Panics if one of the types is not raw.
-    fn raw_union(self, other: Self) -> Self {
+    fn raw_merge_into_subset(
+        self,
+        other: Self,
+        merge: impl Fn(TypeConstraint, TypeConstraint) -> Option<TypeConstraint>,
+    ) -> Self {
         assert!(self.is_raw());
         assert!(other.is_raw());
 
-        let flags = self.flags.union(other.flags);
-        // if constraints turn into "any"
-        // - remove constraint
-        // - (flag is already set; leave it as is)
+        let mut flags = self.flags.intersection(other.flags);
 
-        todo!();
-    }
+        // more complicated than raw_merge_into_superset since flags might need to get cleared
+        let constraints = merge_join_by(
+            self.filter_constraints(flags),
+            other.filter_constraints(flags),
+            |left, right| left.kind().cmp(&right.kind()),
+        )
+        .flat_map(|either_or_both| match either_or_both {
+            EitherOrBoth::Both(left, right) => {
+                let flag = left.flag();
+                assert!(right.flag() == flag);
 
-    /// Performs a difference on [raw](Self::is_raw) types.
-    ///
-    /// Panics if one of the types is not raw.
-    fn raw_difference(self, other: Self) -> Self {
-        assert!(self.is_raw());
-        assert!(other.is_raw());
+                let intersection = merge(left, right);
+                if intersection.is_none() {
+                    flags.remove(flag);
+                }
+                intersection
+            }
+            EitherOrBoth::Left(constraint) | EitherOrBoth::Right(constraint) => Some(constraint),
+        })
+        .collect_vec();
 
-        let flags = self.flags.difference(other.flags);
-
-        todo!();
+        Self::with_constraints(flags, constraints)
     }
 
     /// Whether this type has neither [`TypeFlag::WrapOptional`] nor [`TypeFlag::Complement`] set.
     fn is_raw(&self) -> bool {
         !self.flags.contains(TypeFlag::WrapOptional) && !self.flags.contains(TypeFlag::Complement)
+    }
+
+    /// Constructs a new [`StaticType`] from the given flags and constraints [`Vec`].
+    ///
+    /// If the constraints [`Vec`] is empty, it is correctly stored as just [`None`].
+    fn with_constraints(flags: EnumSet<TypeFlag>, constraints: Vec<TypeConstraint>) -> Self {
+        Self {
+            flags,
+            constraints: (!constraints.is_empty()).then(|| Arc::new(constraints)),
+        }
     }
 }
 
@@ -457,27 +523,27 @@ impl TypeFlag {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 enum TypeConstraint {
-    NegIntegerSmallRange(Reverse<SmallRange>),
-    NegIntegerRange(Reverse<Arc<NaturalRange>>),
-    NegIntegerRanges(Reverse<Arc<Ranges<NaturalRange>>>),
+    NegIntegerSmallRange(SmallRange),
+    NegIntegerRange(Arc<NaturalRange>),
+    NegIntegerRanges(Arc<Ranges<NaturalRange>>),
     PosIntegerSmallRange(SmallRange),
     PosIntegerRange(Arc<NaturalRange>),
     PosIntegerRanges(Arc<Ranges<NaturalRange>>),
 
-    NegRationalSmallRange(Reverse<SmallRange>),
-    NegRationalRange(Reverse<Arc<RationalRange>>),
-    NegRationalRanges(Reverse<Arc<Ranges<RationalRange>>>),
+    NegRationalSmallRange(SmallRange),
+    NegRationalRange(Arc<RationalRange>),
+    NegRationalRanges(Arc<Ranges<RationalRange>>),
     PosRationalSmallRange(SmallRange),
     PosRationalRange(Arc<RationalRange>),
     PosRationalRanges(Arc<Ranges<RationalRange>>),
 
-    NegFiniteF32Range(Reverse<FiniteRange<NotNan<f32>>>),
-    NegFiniteF32Ranges(Reverse<Arc<Ranges<FiniteRange<NotNan<f32>>>>>),
+    NegFiniteF32Range(FiniteRange<NotNan<f32>>),
+    NegFiniteF32Ranges(Arc<Ranges<FiniteRange<NotNan<f32>>>>),
     PosFiniteF32Range(FiniteRange<NotNan<f32>>),
     PosFiniteF32Ranges(Arc<Ranges<FiniteRange<NotNan<f32>>>>),
 
-    NegFiniteF64Range(Reverse<FiniteRange<NotNan<f64>>>),
-    NegFiniteF64Ranges(Reverse<Arc<Ranges<FiniteRange<NotNan<f64>>>>>),
+    NegFiniteF64Range(FiniteRange<NotNan<f64>>),
+    NegFiniteF64Ranges(Arc<Ranges<FiniteRange<NotNan<f64>>>>),
     PosFiniteF64Range(FiniteRange<NotNan<f64>>),
     PosFiniteF64Ranges(Arc<Ranges<FiniteRange<NotNan<f64>>>>),
 
@@ -490,23 +556,31 @@ enum TypeConstraint {
 
     UnitStringCharRange(CharRange),
     UnitStringCharRanges(Arc<Ranges<CharRange>>),
+    StringLenSmallRange(SmallRange),
     StringLenRange(Arc<NaturalRange>),
     StringLenRanges(Arc<Ranges<NaturalRange>>),
     StringCharRange(CharRange),
     StringCharRanges(Arc<Ranges<CharRange>>),
 
     UnitListItemType(StaticType),
+    UnitListItemTypes(Arc<BTreeSet<StaticType>>),
+    ListLenSmallRange(SmallRange),
     ListLenRange(Arc<NaturalRange>),
     ListLenRanges(Arc<Ranges<NaturalRange>>),
     ListItemType(StaticType),
+    ListItemTypes(Arc<BTreeSet<StaticType>>),
 
     UnitSetItemType(StaticType),
+    UnitSetItemTypes(Arc<BTreeSet<StaticType>>),
+    SetLenSmallRange(SmallRange),
     SetLenRange(Arc<NaturalRange>),
     SetLenRanges(Arc<Ranges<NaturalRange>>),
     SetItemType(StaticType),
+    SetItemTypes(Arc<BTreeSet<StaticType>>),
 
     UnitMapItemType(Arc<MapItemType>),
     UnitMapItemTypes(Arc<MapItemTypes>),
+    MapLenSmallRange(SmallRange),
     MapLenRange(Arc<NaturalRange>),
     MapLenRanges(Arc<Ranges<NaturalRange>>),
     MapItemType(Arc<MapItemType>),
@@ -526,58 +600,349 @@ enum TypeConstraint {
 }
 
 impl TypeConstraint {
-    /// A cheap dummy value that can be used with [`replace`].
-    const DUMMY: Self = Self::StringCharRange(CharRange {
-        min: '\0',
-        max: '\0',
-    });
+    // /// A cheap dummy value that can be used with [`replace`].
+    // const DUMMY: Self = Self::StringCharRange(CharRange {
+    //     min: '\0',
+    //     max: '\0',
+    // });
 
     /// Which flag this constraint corresponds to.
-    ///
-    /// This is _not_ sufficient for sorting type constraints, since some [`TypeFlag`]s can have
-    /// multiple different constraints. E.g. lists have separate length and item type constraints.
     fn flag(&self) -> TypeFlag {
+        self.kind().flag()
+    }
+
+    /// The kind of this constraint.
+    fn kind(&self) -> TypeConstraintKind {
         match self {
-            Self::NegIntegerSmallRange(_)
-            | Self::NegIntegerRange(_)
-            | Self::NegIntegerRanges(_) => TypeFlag::NegInteger,
-            Self::PosIntegerSmallRange(_)
-            | Self::PosIntegerRange(_)
-            | Self::PosIntegerRanges(_) => TypeFlag::PosInteger,
-            Self::NegRationalSmallRange(_)
-            | Self::NegRationalRange(_)
-            | Self::NegRationalRanges(_) => TypeFlag::NegRational,
-            Self::PosRationalSmallRange(_)
-            | Self::PosRationalRange(_)
-            | Self::PosRationalRanges(_) => TypeFlag::PosRational,
-            Self::NegFiniteF32Range(_) | Self::NegFiniteF32Ranges(_) => TypeFlag::NegFiniteF32,
-            Self::PosFiniteF32Range(_) | Self::PosFiniteF32Ranges(_) => TypeFlag::PosFiniteF32,
-            Self::NegFiniteF64Range(_) | Self::NegFiniteF64Ranges(_) => TypeFlag::NegFiniteF64,
-            Self::PosFiniteF64Range(_) | Self::PosFiniteF64Ranges(_) => TypeFlag::PosFiniteF64,
-            Self::UnitValue(_) => TypeFlag::UnitValue,
-            Self::AsciiCharRange(_) | Self::AsciiCharRanges(_) => TypeFlag::AsciiChar,
-            Self::UnicodeCharRange(_) | Self::UnicodeCharRanges(_) => TypeFlag::UnicodeChar,
-            Self::UnitStringCharRange(_) | Self::UnitStringCharRanges(_) => TypeFlag::UnitString,
-            Self::StringLenRange(_)
-            | Self::StringLenRanges(_)
-            | Self::StringCharRange(_)
-            | Self::StringCharRanges(_) => TypeFlag::String,
-            Self::UnitListItemType(_) => TypeFlag::UnitList,
-            Self::ListLenRange(_) | Self::ListLenRanges(_) | Self::ListItemType(_) => {
-                TypeFlag::List
+            TypeConstraint::NegIntegerSmallRange(_)
+            | TypeConstraint::NegIntegerRange(_)
+            | TypeConstraint::NegIntegerRanges(_) => TypeConstraintKind::NegInteger,
+            TypeConstraint::PosIntegerSmallRange(_)
+            | TypeConstraint::PosIntegerRange(_)
+            | TypeConstraint::PosIntegerRanges(_) => TypeConstraintKind::PosInteger,
+            TypeConstraint::NegRationalSmallRange(_)
+            | TypeConstraint::NegRationalRange(_)
+            | TypeConstraint::NegRationalRanges(_) => TypeConstraintKind::NegRational,
+            TypeConstraint::PosRationalSmallRange(_)
+            | TypeConstraint::PosRationalRange(_)
+            | TypeConstraint::PosRationalRanges(_) => TypeConstraintKind::PosRational,
+            TypeConstraint::NegFiniteF32Range(_) | TypeConstraint::NegFiniteF32Ranges(_) => {
+                TypeConstraintKind::NegFiniteF32
             }
-            Self::UnitSetItemType(_) => TypeFlag::UnitSet,
-            Self::SetLenRange(_) | Self::SetLenRanges(_) | Self::SetItemType(_) => TypeFlag::Set,
-            Self::UnitMapItemType(_) | Self::UnitMapItemTypes(_) => TypeFlag::UnitMap,
-            Self::MapLenRange(_)
-            | Self::MapLenRanges(_)
-            | Self::MapItemType(_)
-            | Self::MapItemTypes(_) => TypeFlag::Map,
-            Self::StructDefinition(_) | Self::StructDefinitions(_) => TypeFlag::Struct,
-            Self::FunctionSignature(_) | Self::FunctionSignatures(_) => TypeFlag::Function,
-            Self::Distinct(_) => TypeFlag::Distinct,
-            Self::TraitBound(_) => TypeFlag::TraitBound,
-            Self::Meta(_) => TypeFlag::Meta,
+            TypeConstraint::PosFiniteF32Range(_) | TypeConstraint::PosFiniteF32Ranges(_) => {
+                TypeConstraintKind::PosFiniteF32
+            }
+            TypeConstraint::NegFiniteF64Range(_) | TypeConstraint::NegFiniteF64Ranges(_) => {
+                TypeConstraintKind::NegFiniteF64
+            }
+            TypeConstraint::PosFiniteF64Range(_) | TypeConstraint::PosFiniteF64Ranges(_) => {
+                TypeConstraintKind::PosFiniteF64
+            }
+            TypeConstraint::UnitValue(_) => TypeConstraintKind::UnitValue,
+            TypeConstraint::AsciiCharRange(_) | TypeConstraint::AsciiCharRanges(_) => {
+                TypeConstraintKind::AsciiChar
+            }
+            TypeConstraint::UnicodeCharRange(_) | TypeConstraint::UnicodeCharRanges(_) => {
+                TypeConstraintKind::UnicodeChar
+            }
+            TypeConstraint::UnitStringCharRange(_) | TypeConstraint::UnitStringCharRanges(_) => {
+                TypeConstraintKind::UnitStringChar
+            }
+            TypeConstraint::StringLenSmallRange(_)
+            | TypeConstraint::StringLenRange(_)
+            | TypeConstraint::StringLenRanges(_) => TypeConstraintKind::StringLen,
+            TypeConstraint::StringCharRange(_) | TypeConstraint::StringCharRanges(_) => {
+                TypeConstraintKind::StringChar
+            }
+            TypeConstraint::UnitListItemType(_) | TypeConstraint::UnitListItemTypes(_) => {
+                TypeConstraintKind::UnitListItemType
+            }
+            TypeConstraint::ListLenSmallRange(_)
+            | TypeConstraint::ListLenRange(_)
+            | TypeConstraint::ListLenRanges(_) => TypeConstraintKind::ListLen,
+            TypeConstraint::ListItemType(_) | TypeConstraint::ListItemTypes(_) => {
+                TypeConstraintKind::ListItemType
+            }
+            TypeConstraint::UnitSetItemType(_) | TypeConstraint::UnitSetItemTypes(_) => {
+                TypeConstraintKind::UnitSetItemType
+            }
+            TypeConstraint::SetLenSmallRange(_)
+            | TypeConstraint::SetLenRange(_)
+            | TypeConstraint::SetLenRanges(_) => TypeConstraintKind::SetLen,
+            TypeConstraint::SetItemType(_) | TypeConstraint::SetItemTypes(_) => {
+                TypeConstraintKind::SetItemType
+            }
+            TypeConstraint::UnitMapItemType(_) | TypeConstraint::UnitMapItemTypes(_) => {
+                TypeConstraintKind::UnitMapItemType
+            }
+            TypeConstraint::MapLenSmallRange(_)
+            | TypeConstraint::MapLenRange(_)
+            | TypeConstraint::MapLenRanges(_) => TypeConstraintKind::MapLen,
+            TypeConstraint::MapItemType(_) | TypeConstraint::MapItemTypes(_) => {
+                TypeConstraintKind::MapItemType
+            }
+            TypeConstraint::StructDefinition(_) | TypeConstraint::StructDefinitions(_) => {
+                TypeConstraintKind::StructDefinition
+            }
+            TypeConstraint::FunctionSignature(_) | TypeConstraint::FunctionSignatures(_) => {
+                TypeConstraintKind::FunctionSignature
+            }
+            TypeConstraint::Distinct(_) => TypeConstraintKind::Distinct,
+            TypeConstraint::TraitBound(_) => TypeConstraintKind::TraitBound,
+            TypeConstraint::Meta(_) => TypeConstraintKind::Meta,
+        }
+    }
+
+    /// Returns a [`TypeConstraint`] that allows values that are allowed by either of the two.
+    ///
+    /// Returns [`None`] if the union is no longer constraining any value.
+    ///
+    /// Panics if the two types have differing [`TypeConstraintKind`]s.
+    fn union(self, other: Self) -> Option<Self> {
+        self.merge::<Union>(other)
+    }
+
+    /// Returns a [`TypeConstraint`] that only allows values that are allowed by both.
+    ///
+    /// Returns [`None`] if the intersection is empty.
+    ///
+    /// Panics if the two types have differing [`TypeConstraintKind`]s.
+    fn intersection(self, other: Self) -> Option<Self> {
+        self.merge::<Intersection>(other)
+    }
+
+    /// Returns a [`TypeConstraint`] that allows the same values except those in `other`.
+    ///
+    /// Returns [`None`] if the union is no longer constraining any value.
+    ///
+    /// Panics if the two types have differing [`TypeConstraintKind`]s.
+    fn difference(self, other: Self) -> Option<Self> {
+        self.merge::<Difference>(other)
+    }
+
+    fn merge<T: Merge>(self, other: Self) -> Option<Self> {
+        macro_rules! match_all_impl {
+            ( $( [ $( $Lhs:ident $( [ $Rhs:ident $merge:ident [ $( $Build:ident )* ]] )* )* ] )* ) => {
+                match (self, other) {
+                    $( $( $( (Self::$Lhs(lhs), Self::$Rhs(rhs)) => {
+                        T::$merge(lhs.into(), rhs.into(), ( $( Self::$Build ),* ) )
+                    } )* )* )*
+                    _ => panic!("incompatible type constraints"),
+                }
+            };
+        }
+
+        macro_rules! match_all_spread_rhs {
+            ( $( [ $( $Lhs:ident [ [ $( $Rhs:ident )* ] $merge:ident $Build:tt ] )* ] )* ) => {
+                match_all_impl!( $( [ $( $Lhs $( [ $Rhs $merge $Build ] )* )* ] )* )
+            };
+        }
+
+        macro_rules! match_all_spread_lhs {
+            ( $( [ $( $Lhs:ident )* ] $Rest:tt )* ) => {
+                match_all_spread_rhs!( $( [ $( $Lhs $Rest )* ] )* )
+            };
+        }
+
+        macro_rules! match_all {
+            ( $( $( $Constraint:ident )|* => $merge:ident, )* ) => {
+                match_all_spread_lhs!( $(
+                    [ $( $Constraint )* ]
+                    [[ $( $Constraint )* ] $merge [ $( $Constraint )* ]]
+                )* )
+            };
+        }
+
+        match_all! {
+            NegIntegerSmallRange | NegIntegerRange | NegIntegerRanges => merge_natural_ranges,
+            PosIntegerSmallRange | PosIntegerRange | PosIntegerRanges => merge_natural_ranges,
+
+            // NegRationalSmallRange | NegRationalRange | NegRationalRanges => merge_rational_ranges,
+            // PosRationalSmallRange | PosRationalRange | PosRationalRanges => merge_rational_ranges,
+
+            // NegFiniteF32Range | NegFiniteF32Ranges => merge_f32_ranges,
+            // PosFiniteF32Range | PosFiniteF32Ranges => merge_f32_ranges,
+
+            // NegFiniteF64Range | NegFiniteF64Ranges => merge_f64_ranges,
+            // PosFiniteF64Range | PosFiniteF64Ranges => merge_f64_ranges,
+
+            // UnitValue => merge_unit_values,
+
+            // AsciiCharRange | AsciiCharRanges => merge_ascii_char_ranges,
+            // UnicodeCharRange | UnicodeCharRanges => merge_unicode_char_ranges,
+
+            // UnitStringCharRange | UnitStringCharRanges => merge_char_ranges,
+            StringLenSmallRange | StringLenRange | StringLenRanges => merge_natural_ranges,
+            // StringCharRange | StringCharRanges => merge_char_ranges,
+
+            // UnitListItemType | UnitListItemTypes => merge_types,
+            ListLenSmallRange | ListLenRange | ListLenRanges => merge_natural_ranges,
+            // ListItemType | ListItemTypes => merge_types,
+
+            // UnitSetItemType | UnitSetItemTypes => merge_types,
+            SetLenSmallRange | SetLenRange | SetLenRanges => merge_natural_ranges,
+            // SetItemType | SetItemTypes => merge_types,
+
+            // UnitMapItemType | UnitMapItemTypes => merge_map_item_types,
+            MapLenSmallRange | MapLenRange | MapLenRanges => merge_natural_ranges,
+            // MapItemType | MapItemTypes => merge_map_item_types,
+
+            // StructDefinition | StructDefinitions => merge_struct_definitions,
+
+            // FunctionSignature | FunctionSignatures => merge_function_signatures,
+
+            // Distinct => merge_distincts,
+
+            // TraitBound => merge_trait_bounds,
+
+            // Meta => merge_metas,
+        }
+    }
+}
+
+trait BuildNaturalRange {
+    fn small_range(self, range: SmallRange) -> TypeConstraint;
+    fn natural_range(self, range: Arc<NaturalRange>) -> TypeConstraint;
+    fn natural_ranges(self, range: Arc<Ranges<NaturalRange>>) -> TypeConstraint;
+}
+
+impl<A, B, C> BuildNaturalRange for (A, B, C)
+where
+    A: FnOnce(SmallRange) -> TypeConstraint,
+    B: FnOnce(Arc<NaturalRange>) -> TypeConstraint,
+    C: FnOnce(Arc<Ranges<NaturalRange>>) -> TypeConstraint,
+{
+    fn small_range(self, range: SmallRange) -> TypeConstraint {
+        self.0(range)
+    }
+
+    fn natural_range(self, range: Arc<NaturalRange>) -> TypeConstraint {
+        self.1(range)
+    }
+
+    fn natural_ranges(self, range: Arc<Ranges<NaturalRange>>) -> TypeConstraint {
+        self.2(range)
+    }
+}
+
+trait Merge {
+    fn merge_natural_ranges(
+        lhs: AnyNaturalRange,
+        rhs: AnyNaturalRange,
+        build: impl BuildNaturalRange,
+    ) -> Option<TypeConstraint>;
+}
+
+struct Union;
+
+impl Merge for Union {
+    fn merge_natural_ranges(
+        lhs: AnyNaturalRange,
+        rhs: AnyNaturalRange,
+        build: impl BuildNaturalRange,
+    ) -> Option<TypeConstraint> {
+        todo!()
+    }
+}
+
+struct Intersection;
+
+impl Merge for Intersection {
+    fn merge_natural_ranges(
+        lhs: AnyNaturalRange,
+        rhs: AnyNaturalRange,
+        build: impl BuildNaturalRange,
+    ) -> Option<TypeConstraint> {
+        todo!()
+    }
+}
+
+struct Difference;
+
+impl Merge for Difference {
+    fn merge_natural_ranges(
+        lhs: AnyNaturalRange,
+        rhs: AnyNaturalRange,
+        build: impl BuildNaturalRange,
+    ) -> Option<TypeConstraint> {
+        todo!()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+enum TypeConstraintKind {
+    NegInteger,
+    PosInteger,
+
+    NegRational,
+    PosRational,
+
+    NegFiniteF32,
+    PosFiniteF32,
+
+    NegFiniteF64,
+    PosFiniteF64,
+
+    UnitValue,
+
+    AsciiChar,
+    UnicodeChar,
+
+    UnitStringChar,
+    StringLen,
+    StringChar,
+
+    UnitListItemType,
+    ListLen,
+    ListItemType,
+
+    UnitSetItemType,
+    SetLen,
+    SetItemType,
+
+    UnitMapItemType,
+    MapLen,
+    MapItemType,
+
+    StructDefinition,
+
+    FunctionSignature,
+
+    Distinct,
+
+    TraitBound,
+
+    Meta,
+}
+
+impl TypeConstraintKind {
+    /// Which flag this constraint corresponds to.
+    fn flag(self) -> TypeFlag {
+        match self {
+            Self::NegInteger => TypeFlag::NegInteger,
+            Self::PosInteger => TypeFlag::PosInteger,
+            Self::NegRational => TypeFlag::NegRational,
+            Self::PosRational => TypeFlag::PosRational,
+            Self::NegFiniteF32 => TypeFlag::NegFiniteF32,
+            Self::PosFiniteF32 => TypeFlag::PosFiniteF32,
+            Self::NegFiniteF64 => TypeFlag::NegFiniteF64,
+            Self::PosFiniteF64 => TypeFlag::PosFiniteF64,
+            Self::UnitValue => TypeFlag::UnitValue,
+            Self::AsciiChar => TypeFlag::AsciiChar,
+            Self::UnicodeChar => TypeFlag::UnicodeChar,
+            Self::UnitStringChar => TypeFlag::UnitString,
+            Self::StringLen | Self::StringChar => TypeFlag::String,
+            Self::UnitListItemType => TypeFlag::UnitList,
+            Self::ListLen | Self::ListItemType => TypeFlag::List,
+            Self::UnitSetItemType => TypeFlag::UnitSet,
+            Self::SetLen | Self::SetItemType => TypeFlag::Set,
+            Self::UnitMapItemType => TypeFlag::UnitMap,
+            Self::MapLen | Self::MapItemType => TypeFlag::Map,
+            Self::StructDefinition => TypeFlag::Struct,
+            Self::FunctionSignature => TypeFlag::Function,
+            Self::Distinct => TypeFlag::Distinct,
+            Self::TraitBound => TypeFlag::TraitBound,
+            Self::Meta => TypeFlag::Meta,
         }
     }
 }
@@ -589,17 +954,29 @@ impl TypeConstraint {
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct Ranges<T>(Vec<T>);
 
-enum RangeResult<T> {
-    Range(T),
-    Ranges(Ranges<T>),
+enum AnyNaturalRange {
+    SmallRange(SmallRange),
+    NaturalRange(Arc<NaturalRange>),
+    NaturalRanges(Arc<Ranges<NaturalRange>>),
 }
 
-impl<T> RangeResult<T> {
-    fn map<R>(self, map_range: impl FnOnce(T) -> R, map_ranges: impl FnOnce(Ranges<T>) -> R) -> R {
-        match self {
-            Self::Range(range) => map_range(range),
-            Self::Ranges(ranges) => map_ranges(ranges),
-        }
+// TODO: derive From with some enum crate, forgot which one
+
+impl From<SmallRange> for AnyNaturalRange {
+    fn from(value: SmallRange) -> Self {
+        todo!()
+    }
+}
+
+impl From<Arc<NaturalRange>> for AnyNaturalRange {
+    fn from(value: Arc<NaturalRange>) -> Self {
+        todo!()
+    }
+}
+
+impl From<Arc<Ranges<NaturalRange>>> for AnyNaturalRange {
+    fn from(value: Arc<Ranges<NaturalRange>>) -> Self {
+        todo!()
     }
 }
 
