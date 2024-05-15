@@ -63,7 +63,7 @@ impl StaticType {
         } else {
             Self {
                 flags: enum_set!(TypeFlag::EmptyList | TypeFlag::UnitList),
-                constraints: Some(Arc::new(vec![TypeConstraint::ListItemType(self)])),
+                constraints: Some(Arc::new(vec![TypeConstraint::UnitListItemType(self)])),
             }
         }
     }
@@ -84,7 +84,7 @@ impl StaticType {
         if self.flags.remove(TypeFlag::WrapOptional) {
             Self {
                 flags: enum_set!(TypeFlag::Complement | TypeFlag::EmptyList | TypeFlag::UnitList),
-                constraints: Some(Arc::new(vec![TypeConstraint::ListItemType(self)])),
+                constraints: Some(Arc::new(vec![TypeConstraint::UnitListItemType(self)])),
             }
         } else {
             self.flags ^= TypeFlag::Complement;
@@ -144,8 +144,9 @@ impl StaticType {
             return Err(self);
         }
 
-        if let [TypeConstraint::ListItemType(_)] = self.constraints() {
-            let TypeConstraint::ListItemType(unwrapped) = self.into_constraints().pop().unwrap()
+        if let [TypeConstraint::UnitListItemType(_)] = self.constraints() {
+            let TypeConstraint::UnitListItemType(unwrapped) =
+                self.into_constraints().pop().unwrap()
             else {
                 unreachable!();
             };
@@ -388,19 +389,25 @@ enum TypeConstraint {
     UnicodeCharRange(UnicodeCharRange),
     UnicodeCharRanges(Arc<Ranges<UnicodeCharRange>>),
 
+    UnitStringCharRange(CharRange),
+    UnitStringCharRanges(Arc<Ranges<CharRange>>),
     StringLenRange(Arc<NaturalRange>),
     StringLenRanges(Arc<Ranges<NaturalRange>>),
     StringCharRange(CharRange),
     StringCharRanges(Arc<Ranges<CharRange>>),
 
+    UnitListItemType(StaticType),
     ListLenRange(Arc<NaturalRange>),
     ListLenRanges(Arc<Ranges<NaturalRange>>),
     ListItemType(StaticType),
 
+    UnitSetItemType(StaticType),
     SetLenRange(Arc<NaturalRange>),
     SetLenRanges(Arc<Ranges<NaturalRange>>),
     SetItemType(StaticType),
 
+    UnitMapItemType(Arc<MapItemType>),
+    UnitMapItemTypes(Arc<MapItemTypes>),
     MapLenRange(Arc<NaturalRange>),
     MapLenRanges(Arc<Ranges<NaturalRange>>),
     MapItemType(Arc<MapItemType>),
@@ -451,14 +458,18 @@ impl TypeConstraint {
             Self::UnitValue(_) => TypeFlag::UnitValue,
             Self::AsciiCharRange(_) | Self::AsciiCharRanges(_) => TypeFlag::AsciiChar,
             Self::UnicodeCharRange(_) | Self::UnicodeCharRanges(_) => TypeFlag::UnicodeChar,
+            Self::UnitStringCharRange(_) | Self::UnitStringCharRanges(_) => TypeFlag::UnitString,
             Self::StringLenRange(_)
             | Self::StringLenRanges(_)
             | Self::StringCharRange(_)
             | Self::StringCharRanges(_) => TypeFlag::String,
+            Self::UnitListItemType(_) => TypeFlag::UnitList,
             Self::ListLenRange(_) | Self::ListLenRanges(_) | Self::ListItemType(_) => {
                 TypeFlag::List
             }
+            Self::UnitSetItemType(_) => TypeFlag::UnitSet,
             Self::SetLenRange(_) | Self::SetLenRanges(_) | Self::SetItemType(_) => TypeFlag::Set,
+            Self::UnitMapItemType(_) | Self::UnitMapItemTypes(_) => TypeFlag::UnitMap,
             Self::MapLenRange(_)
             | Self::MapLenRanges(_)
             | Self::MapItemType(_)
