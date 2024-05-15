@@ -121,7 +121,9 @@ impl StaticType {
     pub fn symmetric_difference(self, other: Self) -> Self {
         todo!()
     }
+}
 
+impl StaticType {
     /// Constructs from the given flags without any constraints.
     const fn from_flags(flags: EnumSet<TypeFlag>) -> Self {
         Self {
