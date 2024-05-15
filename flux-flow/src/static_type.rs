@@ -48,7 +48,7 @@ impl StaticType {
     ///
     /// Optionals are represented as zero-to-one element lists. Additionally, since this is such a
     /// common thing to do, a single level of "optional" is encoded directly into the [`TypeFlag`]s.
-    pub fn make_optional(mut self) -> Self {
+    pub fn optional(mut self) -> Self {
         if self.flags.insert(TypeFlag::WrapOptional) {
             self
         } else {
@@ -142,7 +142,7 @@ impl StaticType {
     /// If the type is not an optional, it is returned as is.
     fn optimize_optional(self) -> Self {
         self.unwrap_unoptimized_optional()
-            .map_or_else(identity, |unwrapped| unwrapped.make_optional())
+            .map_or_else(identity, |unwrapped| unwrapped.optional())
     }
 
     /// Returns a slice of all constraints.
