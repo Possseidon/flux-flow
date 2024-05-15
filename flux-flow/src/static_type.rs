@@ -17,10 +17,19 @@ use ordered_float::NotNan;
 
 // TODO: Split the different constraints into multiple files
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StaticType {
     flags: EnumSet<TypeFlag>,
     constraints: Option<Arc<Vec<TypeConstraint>>>,
+}
+
+impl std::fmt::Debug for StaticType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StaticType")
+            .field("flags", &self.flags)
+            .field("constraints", &self.constraints())
+            .finish()
+    }
 }
 
 impl StaticType {
