@@ -25,10 +25,15 @@ pub struct StaticType {
 
 impl std::fmt::Debug for StaticType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StaticType")
-            .field("flags", &self.flags)
-            .field("constraints", &self.constraints())
-            .finish()
+        f.write_str("StaticType")?;
+        if self.flags.contains(TypeFlag::WrapOptional) {
+            f.write_str("::Optional")?;
+        }
+        if self.flags.contains(TypeFlag::Complement) {
+            f.write_str("::Complement")?;
+        }
+        f.write_str(" ")?;
+        f.debug_map().entries(self.iter_types()).finish()
     }
 }
 
@@ -165,6 +170,28 @@ impl StaticType {
     fn optimize_optional(self) -> Self {
         self.unwrap_unoptimized_optional()
             .map_or_else(identity, |unwrapped| unwrapped.optional())
+    }
+
+    /// Returns an iterator over all [`TypeFlag`]s together with their [`TypeConstraint`]s.
+    ///
+    /// [`TypeFlag::WrapOptional`] and [`TypeFlag::Complement`] are separated out beforehand.
+    fn iter_types(&self) -> impl Iterator<Item = (TypeFlag, &[TypeConstraint])> {
+        self.flags
+            .difference(TypeFlag::WrapOptional | TypeFlag::Complement)
+            .into_iter()
+            .map({
+                let mut remaining_constraints = self.constraints();
+                move |flag| {
+                    let next_flag_type = remaining_constraints
+                        .iter()
+                        .position(|constraint| constraint.flag() != flag)
+                        .unwrap_or(remaining_constraints.len());
+                    let (matching_constraints, rest) =
+                        remaining_constraints.split_at(next_flag_type);
+                    remaining_constraints = rest;
+                    (flag, matching_constraints)
+                }
+            })
     }
 
     /// Returns a slice of all constraints.
