@@ -196,14 +196,6 @@ impl StaticType {
 /// Additional [`TypeConstraint`]s may apply to some variants.
 #[derive(Debug, PartialOrd, Ord, EnumSetType)]
 enum TypeFlag {
-    /// Marks the type as holding anything except the values that it would hold without this flag.
-    ///
-    /// If [`TypeFlag::WrapOptional`] is also set, it results in an optional any, since that is more
-    /// common than a type that can hold everything except a specific optional.
-    ///
-    /// This is one of the special flags that don't directly correspond to actual values.
-    Complement,
-
     /// Wraps the original type in a zero-to-one element list.
     ///
     /// Used as an optimization to avoid going through [`TypeConstraint`].
@@ -219,6 +211,14 @@ enum TypeFlag {
     ///
     /// This is one of the special flags that don't directly correspond to actual values.
     WrapOptional,
+
+    /// Marks the type as holding anything except the values that it would hold without this flag.
+    ///
+    /// If [`TypeFlag::WrapOptional`] is also set, it results in an optional any, since that is more
+    /// common than a type that can hold everything except a specific optional.
+    ///
+    /// This is one of the special flags that don't directly correspond to actual values.
+    Complement,
 
     /// The [`bool`] value `false`.
     False,
