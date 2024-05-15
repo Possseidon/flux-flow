@@ -109,22 +109,35 @@ impl StaticType {
 
     /// Returns a type that only allows values that are allowed by both types.
     pub fn intersection(self, other: Self) -> Self {
-        todo!()
+        let lhs = self.unoptimize_optional();
+        let rhs = other.unoptimize_optional();
+        match (
+            lhs.flags.contains(TypeFlag::Complement),
+            rhs.flags.contains(TypeFlag::Complement),
+        ) {
+            (false, false) => lhs.raw_intersection(rhs),
+            (false, true) => lhs.raw_difference(rhs.complement()),
+            (true, false) => rhs.raw_difference(lhs.complement()),
+            (true, true) => lhs.complement().raw_union(rhs.complement()),
+        }
+        .optimize_optional()
     }
 
     /// Returns a type that allows values that are allowed by either of the two types.
     pub fn union(self, other: Self) -> Self {
-        todo!()
+        self.complement()
+            .intersection(other.complement())
+            .complement()
     }
 
     /// Returns a type that allows all values of `self` except those allowed by `other`.
     pub fn difference(self, other: Self) -> Self {
-        todo!()
+        self.intersection(other.complement())
     }
 
     /// Returns a type that allows values that are allowed by either of the two types but not both.
     pub fn symmetric_difference(self, other: Self) -> Self {
-        todo!()
+        self.intersection(other).complement()
     }
 }
 
@@ -172,6 +185,18 @@ impl StaticType {
             .map_or_else(identity, |unwrapped| unwrapped.optional())
     }
 
+    /// If [`TypeFlag::WrapOptional`] is set, clears it and replaces it with its unoptimized form.
+    fn unoptimize_optional(mut self) -> Self {
+        if self.flags.remove(TypeFlag::WrapOptional) {
+            Self {
+                flags: enum_set!(TypeFlag::EmptyList | TypeFlag::UnitList),
+                constraints: Some(Arc::new(vec![TypeConstraint::UnitListItemType(self)])),
+            }
+        } else {
+            self
+        }
+    }
+
     /// Returns an iterator over all [`TypeFlag`]s together with their [`TypeConstraint`]s.
     ///
     /// [`TypeFlag::WrapOptional`] and [`TypeFlag::Complement`] are separated out beforehand.
@@ -216,6 +241,41 @@ impl StaticType {
     /// This might still have to clone the [`Vec`], since it is behind an [`Arc`].
     fn into_constraints(self) -> Vec<TypeConstraint> {
         self.constraints.map_or_else(Vec::new, Arc::unwrap_or_clone)
+    }
+
+    /// Performs an intersection on [raw](Self::is_raw) types.
+    ///
+    /// Panics if one of the types is not raw.
+    fn raw_intersection(self, other: Self) -> Self {
+        assert!(self.is_raw());
+        assert!(other.is_raw());
+
+        todo!();
+    }
+
+    /// Performs a union on [raw](Self::is_raw) types.
+    ///
+    /// Panics if one of the types is not raw.
+    fn raw_union(self, other: Self) -> Self {
+        assert!(self.is_raw());
+        assert!(other.is_raw());
+
+        todo!();
+    }
+
+    /// Performs a difference on [raw](Self::is_raw) types.
+    ///
+    /// Panics if one of the types is not raw.
+    fn raw_difference(self, other: Self) -> Self {
+        assert!(self.is_raw());
+        assert!(other.is_raw());
+
+        todo!();
+    }
+
+    /// Whether this type has neither [`TypeFlag::WrapOptional`] nor [`TypeFlag::Complement`] set.
+    fn is_raw(&self) -> bool {
+        !self.flags.contains(TypeFlag::WrapOptional) && !self.flags.contains(TypeFlag::Complement)
     }
 }
 
