@@ -83,6 +83,16 @@ impl StaticType {
         }
     }
 
+    /// Returns whether this type allows at least all values that `other` allows.
+    pub fn is_superset(self, other: Self) -> bool {
+        todo!()
+    }
+
+    /// Returns whether this type allows at most all values that `other` allows.
+    pub fn is_subset(self, other: Self) -> bool {
+        other.is_superset(self)
+    }
+
     /// Returns a type that only allows values that are allowed by both types.
     pub fn intersection(self, other: Self) -> Self {
         todo!()
