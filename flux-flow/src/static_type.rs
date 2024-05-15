@@ -73,12 +73,8 @@ impl StaticType {
     /// Returns a type that allows all values except the ones allowed by this type.
     pub fn complement(mut self) -> Self {
         if self.flags.remove(TypeFlag::WrapOptional) {
-            let mut flags = enum_set!(TypeFlag::EmptyList | TypeFlag::UnitList);
-            if self.flags.remove(TypeFlag::Complement) {
-                flags |= TypeFlag::Complement;
-            }
             Self {
-                flags,
+                flags: enum_set!(TypeFlag::Complement | TypeFlag::EmptyList | TypeFlag::UnitList),
                 constraints: Some(Arc::new(vec![TypeConstraint::ListItemType(self)])),
             }
         } else {
