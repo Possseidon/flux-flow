@@ -250,6 +250,11 @@ impl StaticType {
         assert!(self.is_raw());
         assert!(other.is_raw());
 
+        let flags = self.flags.intersection(other.flags);
+        // if constraints turn into "never"
+        // - remove constraint
+        // - clear corresponding flag
+
         todo!();
     }
 
@@ -260,6 +265,11 @@ impl StaticType {
         assert!(self.is_raw());
         assert!(other.is_raw());
 
+        let flags = self.flags.union(other.flags);
+        // if constraints turn into "any"
+        // - remove constraint
+        // - (flag is already set; leave it as is)
+
         todo!();
     }
 
@@ -269,6 +279,8 @@ impl StaticType {
     fn raw_difference(self, other: Self) -> Self {
         assert!(self.is_raw());
         assert!(other.is_raw());
+
+        let flags = self.flags.difference(other.flags);
 
         todo!();
     }
