@@ -40,8 +40,11 @@ impl PartialEq<OrderedImpl> for Impl {
         let self_map = self.as_map();
         let other_map = other.as_map();
         self_map.len() == other_map.len()
-            && equal(self_map.keys(), other_map.keys())
-            && equal(self_map.values(), other_map.values())
+            && self_map.iter().zip(other_map).all(
+                |((self_key, self_value), (other_key, other_value))| {
+                    self_key == other_key && self_value == other_value
+                },
+            )
     }
 }
 
