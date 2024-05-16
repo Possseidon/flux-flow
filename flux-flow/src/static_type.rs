@@ -19,6 +19,8 @@ use ordered_float::NotNan;
 
 // TODO: Values with units don't get special treatment and are just distinct types
 
+// TODO: Move most of StaticType's doc-comment to RuntimeValue
+
 /// A static type.
 ///
 /// # Ordering
@@ -98,7 +100,7 @@ impl StaticType {
     /// Even though this is an `is_` function, this consumes its arguments. Reason being, that
     /// checking is done via [`Self::difference`].
     pub fn is_subset(self, other: Self) -> bool {
-        // if there is nothing left afte removing other from self, it's a subset
+        // if there is nothing left after removing other from self, it's a subset
         self.difference(other).is_never()
     }
 
