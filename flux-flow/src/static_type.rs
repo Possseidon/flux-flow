@@ -59,6 +59,35 @@ impl StaticType {
     /// Useful for true dynamic typing if absolutely nothing about a variable is known.
     pub const ANY: Self = Self::from_flags(TypeFlag::ANY);
 
+    pub fn is_never(&self) -> bool {
+        self == &Self::NEVER
+    }
+
+    pub fn is_unit(&self) -> bool {
+        self == &Self::UNIT
+    }
+
+    pub fn is_any(&self) -> bool {
+        self == &Self::ANY
+    }
+
+    /// Returns whether this type allows at most all values that `other` allows.
+    ///
+    /// Even though this is an `is_` function, this consumes its arguments. Reason being, that
+    /// checking is done via [`Self::difference`].
+    pub fn is_subset(self, other: Self) -> bool {
+        // if there is nothing left afte removing other from self, it's a subset
+        self.difference(other).is_never()
+    }
+
+    /// Returns whether this type allows at least all values that `other` allows.
+    ///
+    /// Even though this is an `is_` function, this consumes its arguments. Reason being, that
+    /// checking is done via [`Self::difference`].
+    pub fn is_superset(self, other: Self) -> bool {
+        other.is_subset(self)
+    }
+
     /// Makes the type optional.
     ///
     /// Optionals are represented as zero-to-one element lists. Additionally, since this is such a
@@ -96,16 +125,6 @@ impl StaticType {
             self.flags ^= TypeFlag::Complement;
             self.optimize_optional()
         }
-    }
-
-    /// Returns whether this type allows at least all values that `other` allows.
-    pub fn is_superset(self, other: Self) -> bool {
-        todo!()
-    }
-
-    /// Returns whether this type allows at most all values that `other` allows.
-    pub fn is_subset(self, other: Self) -> bool {
-        other.is_superset(self)
     }
 
     /// Returns a type that allows values that are allowed by either of the two types.
