@@ -10,6 +10,8 @@ use std::{sync::Arc, time::Instant};
 
 use ordered_float::OrderedFloat;
 
+use crate::static_type::StaticType;
+
 use self::function::DynFn;
 
 // TODO: structs and lists should have special variants that can reference directly into the stack
@@ -22,6 +24,7 @@ use self::function::DynFn;
 pub enum RuntimeValue {
     Ordered(OrderedRuntimeValue),
     List(RuntimeList),
+    Set(RuntimeSet),
     Map(RuntimeMap),
     Struct(RuntimeStruct),
     Function(RuntimeFunction),
@@ -45,6 +48,10 @@ impl std::hash::Hash for RuntimeValue {
             RuntimeValue::List(list) => {
                 ValueKind::List.hash(state);
                 list.hash(state);
+            }
+            RuntimeValue::Set(set) => {
+                ValueKind::Set.hash(state);
+                set.hash(state);
             }
             RuntimeValue::Map(map) => {
                 ValueKind::Map.hash(state);
@@ -71,13 +78,14 @@ impl PartialEq for RuntimeValue {
         match (self, other) {
             (RuntimeValue::Ordered(lhs), RuntimeValue::Ordered(rhs)) => lhs == rhs,
             (RuntimeValue::List(lhs), RuntimeValue::List(rhs)) => lhs == rhs,
+            (RuntimeValue::Set(lhs), RuntimeValue::Set(rhs)) => lhs == rhs,
             (RuntimeValue::Map(lhs), RuntimeValue::Map(rhs)) => lhs == rhs,
             (RuntimeValue::Struct(lhs), RuntimeValue::Struct(rhs)) => lhs == rhs,
             (RuntimeValue::Function(lhs), RuntimeValue::Function(rhs)) => lhs == rhs,
             (RuntimeValue::Distinct(lhs), RuntimeValue::Distinct(rhs)) => lhs == rhs,
 
-            (RuntimeValue::Ordered(lhs), rhs) => lhs == rhs,
-            (lhs, RuntimeValue::Ordered(rhs)) => lhs == rhs,
+            (RuntimeValue::Ordered(ordered), unordered)
+            | (unordered, RuntimeValue::Ordered(ordered)) => ordered == unordered,
 
             _ => false,
         }
@@ -89,6 +97,7 @@ impl PartialEq<OrderedRuntimeValue> for RuntimeValue {
         match (self, other) {
             (Self::Ordered(lhs), rhs) => lhs == rhs,
             (Self::List(lhs), OrderedRuntimeValue::List(rhs)) => lhs == rhs,
+            (Self::Set(lhs), OrderedRuntimeValue::Set(rhs)) => lhs == rhs,
             (Self::Map(lhs), OrderedRuntimeValue::Map(rhs)) => lhs == rhs,
             (Self::Struct(lhs), OrderedRuntimeValue::Struct(rhs)) => lhs == rhs,
             (Self::Distinct(lhs), OrderedRuntimeValue::Distinct(rhs)) => lhs == rhs,
@@ -118,10 +127,10 @@ pub enum OrderedRuntimeValue {
     Char(char),
     String(RuntimeString),
     List(OrderedRuntimeList),
-    Set(RuntimeSet),
+    Set(OrderedRuntimeSet),
     Map(OrderedRuntimeMap),
     Struct(OrderedRuntimeStruct),
-    Meta(RuntimeMeta),
+    Meta(StaticType),
     Distinct(OrderedRuntimeDistinct),
 }
 
@@ -263,9 +272,26 @@ impl PartialEq<RuntimeList> for OrderedRuntimeList {
     }
 }
 
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
 pub struct RuntimeSet {
     set: set::Impl,
+}
+
+impl PartialEq<OrderedRuntimeSet> for RuntimeSet {
+    fn eq(&self, other: &OrderedRuntimeSet) -> bool {
+        self.set == other.set
+    }
+}
+
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct OrderedRuntimeSet {
+    set: set::OrderedImpl,
+}
+
+impl PartialEq<RuntimeSet> for OrderedRuntimeSet {
+    fn eq(&self, other: &RuntimeSet) -> bool {
+        other == self
+    }
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
