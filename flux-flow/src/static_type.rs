@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    cmp::Ordering,
     convert::identity,
     num::{NonZeroU64, NonZeroU8},
     sync::Arc,
@@ -17,25 +17,47 @@ use ordered_float::NotNan;
 
 // TODO: Split the different constraints into multiple files
 
-#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+// TODO: Values with units don't get special treatment and are just distinct types
+
+/// A static type.
+///
+/// # Ordering
+///
+/// [`StaticType`] defines an ordering for its contained types as follows:
+///
+/// - Boolean - ordered as false, maybe, true
+/// - Number - integers and rationals interleaved
+/// - f32 - NaN comes last and is equal to itself
+/// - f64 - NaN comes last and is equal to itself
+/// - Unit Value - ordered by unit (custom), then by value
+/// - Instant
+/// - UUID
+/// - Char
+/// - String - ordered lexicographically
+/// - List - ordered by item type (custom), then lexicographically
+/// - Set - ordered by item type (custom), then lexicographically
+/// - Map - ordered by key type (custom), then by value type (custom), then lexicographically
+/// - Struct - ordered by field names (custom), then lexicographically by field values
+/// - Meta - ordered by custom order
+/// - Distinct - ordered by custom order
+///
+/// Functions are unordered. Pure functions can in theory be ordered (I think?), but that's just not
+/// feasible. They could also be ordered by some internal pointer, but order should stay consistent
+/// across multiple runs of the same program. As a workaround, distinct can be used to specify a
+/// custom order for function types.
+///
+/// [`StaticType`] itself is also implements [`Ord`] with mostly similar rules with some notes:
+///
+/// - Ranges are sorted lexicographically by their `min` and then `max`
+/// - Function types are ordered after structs, by argument type (custom), then return type (custom)
+///
+/// Complement types come at the very end and are sorted with each other as if they were
+/// non-complement types but in reverse.
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub struct StaticType {
     flags: EnumSet<TypeFlag>,
     /// Sorted and unique by [`TypeConstraint::kind`].
     constraints: Option<Arc<Vec<TypeConstraint>>>,
-}
-
-impl std::fmt::Debug for StaticType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("StaticType")?;
-        if self.flags.contains(TypeFlag::WrapOptional) {
-            f.write_str("::Optional")?;
-        }
-        if self.flags.contains(TypeFlag::Complement) {
-            f.write_str("::Complement")?;
-        }
-        f.write_str(" ")?;
-        f.debug_map().entries(self.iter_types()).finish()
-    }
 }
 
 impl StaticType {
@@ -263,6 +285,7 @@ impl StaticType {
         self.constraints.map_or_else(Vec::new, Arc::unwrap_or_clone)
     }
 
+    /// Consumes `self` and returns an iterator of its [`TypeConstraint`]s that match `flags`.
     fn filter_constraints(self, flags: EnumSet<TypeFlag>) -> impl Iterator<Item = TypeConstraint> {
         self.into_constraints()
             .into_iter()
@@ -376,6 +399,32 @@ impl StaticType {
     }
 }
 
+impl std::fmt::Debug for StaticType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("StaticType")?;
+        if self.flags.contains(TypeFlag::WrapOptional) {
+            f.write_str("::Optional")?;
+        }
+        if self.flags.contains(TypeFlag::Complement) {
+            f.write_str("::Complement")?;
+        }
+        f.write_str(" ")?;
+        f.debug_map().entries(self.iter_types()).finish()
+    }
+}
+
+impl PartialOrd for StaticType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for StaticType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        todo!()
+    }
+}
+
 /// A series of flags that describe what values a type can hold.
 ///
 /// Additional [`TypeConstraint`]s may apply to some variants.
@@ -412,18 +461,18 @@ enum TypeFlag {
     /// The [`bool`] value `true`.
     True,
 
-    /// The integer `0`.
-    Zero,
-    /// The integer `-1`.
-    NegOne,
-    /// The integer `1`.
-    PosOne,
     /// Any negative integer, excluding zero.
     NegInteger,
-    /// Any positive integer, excluding zero.
-    PosInteger,
     /// Any negative, non-integer rational number.
     NegRational,
+    /// The integer `-1`.
+    NegOne,
+    /// The integer `0`.
+    Zero,
+    /// The integer `1`.
+    PosOne,
+    /// Any positive integer, excluding zero.
+    PosInteger,
     /// Any positive, non-integer rational number.
     PosRational,
 
@@ -457,6 +506,16 @@ enum TypeFlag {
     /// [`f64::NAN`].
     NaNF64,
 
+    /// Any instant in time.
+    Instant,
+
+    /// The nil UUID; all zeros.
+    NilUuid,
+    /// Any UUID except nil and max.
+    Uuid,
+    /// The max UUID; all ones.
+    MaxUuid,
+
     /// The [`char`] `'\0'`.
     NullChar,
     /// Any non-null ASCII char.
@@ -470,19 +529,6 @@ enum TypeFlag {
     UnitString,
     /// Any string containing at least two [`char`]s.
     String,
-
-    /// Any value with a unit.
-    UnitValue,
-
-    /// Any instant in time.
-    Instant,
-
-    /// The nil UUID; all zeros.
-    NilUuid,
-    /// Any UUID except nil and max.
-    Uuid,
-    /// The max UUID; all ones.
-    MaxUuid,
 
     /// The empty list.
     EmptyList,
@@ -517,18 +563,11 @@ enum TypeFlag {
     /// Any function with any argument and any return value.
     Function,
 
-    /// Allows for distinct types even if they have the same underlying type.
-    ///
-    /// Similar to the new-type pattern in Rust, but more ingrained into the language, since every
-    /// custom type is essentially a "new-type", whereas in Rust structs and enums themselves are
-    /// already distinct types on their own.
-    Distinct,
-
-    /// A type that satisfies all trait bounds.
-    TraitBound,
-
-    /// Any meta type; i.e. variables that hold type information.
+    /// Any meta type; i.e. the type of a variable that itself stores a [`StaticType`].
     Meta,
+
+    /// Allows for distinct types even if they have the same underlying type.
+    Distinct,
 }
 
 impl TypeFlag {
@@ -566,8 +605,6 @@ enum TypeConstraint {
     PosFiniteF64Range(FiniteRange<NotNan<f64>>),
     PosFiniteF64Ranges(Arc<Ranges<FiniteRange<NotNan<f64>>>>),
 
-    UnitValue(UnitValueConstraints),
-
     AsciiCharRange(AsciiCharRange),
     AsciiCharRanges(Arc<Ranges<AsciiCharRange>>),
     UnicodeCharRange(UnicodeCharRange),
@@ -582,20 +619,20 @@ enum TypeConstraint {
     StringCharRanges(Arc<Ranges<CharRange>>),
 
     UnitListItemType(StaticType),
-    UnitListItemTypes(Arc<BTreeSet<StaticType>>),
+    UnitListItemTypes(Arc<Vec<StaticType>>),
     ListLenSmallRange(SmallRange),
     ListLenRange(Arc<NaturalRange>),
     ListLenRanges(Arc<Ranges<NaturalRange>>),
     ListItemType(StaticType),
-    ListItemTypes(Arc<BTreeSet<StaticType>>),
+    ListItemTypes(Arc<Vec<StaticType>>),
 
     UnitSetItemType(StaticType),
-    UnitSetItemTypes(Arc<BTreeSet<StaticType>>),
+    UnitSetItemTypes(Arc<Vec<StaticType>>),
     SetLenSmallRange(SmallRange),
     SetLenRange(Arc<NaturalRange>),
     SetLenRanges(Arc<Ranges<NaturalRange>>),
     SetItemType(StaticType),
-    SetItemTypes(Arc<BTreeSet<StaticType>>),
+    SetItemTypes(Arc<Vec<StaticType>>),
 
     UnitMapItemType(Arc<MapItemType>),
     UnitMapItemTypes(Arc<MapItemTypes>),
@@ -608,14 +645,12 @@ enum TypeConstraint {
     StructDefinition(Arc<StructDefinition>),
     StructDefinitions(Arc<StructDefinitions>),
 
-    FunctionSignature(Arc<FunctionSignature>),
-    FunctionSignatures(Arc<FunctionSignatures>),
+    Meta(Arc<MetaConstraints>),
 
     Distinct(DistinctConstraints),
 
-    TraitBound(TraitBoundConstraints),
-
-    Meta(Arc<MetaConstraints>),
+    FunctionSignature(Arc<FunctionSignature>),
+    FunctionSignatures(Arc<FunctionSignatures>),
 }
 
 impl TypeConstraint {
@@ -657,7 +692,6 @@ impl TypeConstraint {
             TypeConstraint::PosFiniteF64Range(_) | TypeConstraint::PosFiniteF64Ranges(_) => {
                 TypeConstraintKind::PosFiniteF64
             }
-            TypeConstraint::UnitValue(_) => TypeConstraintKind::UnitValue,
             TypeConstraint::AsciiCharRange(_) | TypeConstraint::AsciiCharRanges(_) => {
                 TypeConstraintKind::AsciiChar
             }
@@ -706,9 +740,8 @@ impl TypeConstraint {
             TypeConstraint::FunctionSignature(_) | TypeConstraint::FunctionSignatures(_) => {
                 TypeConstraintKind::FunctionSignature
             }
-            TypeConstraint::Distinct(_) => TypeConstraintKind::Distinct,
-            TypeConstraint::TraitBound(_) => TypeConstraintKind::TraitBound,
             TypeConstraint::Meta(_) => TypeConstraintKind::Meta,
+            TypeConstraint::Distinct(_) => TypeConstraintKind::Distinct,
         }
     }
 
@@ -784,8 +817,6 @@ impl TypeConstraint {
 
             // NegFiniteF64Range | NegFiniteF64Ranges => merge_f64_ranges,
             // PosFiniteF64Range | PosFiniteF64Ranges => merge_f64_ranges,
-
-            // UnitValue => merge_unit_values,
 
             // AsciiCharRange | AsciiCharRanges => merge_ascii_char_ranges,
             // UnicodeCharRange | UnicodeCharRanges => merge_unicode_char_ranges,
@@ -902,8 +933,6 @@ enum TypeConstraintKind {
     NegFiniteF64,
     PosFiniteF64,
 
-    UnitValue,
-
     AsciiChar,
     UnicodeChar,
 
@@ -927,11 +956,9 @@ enum TypeConstraintKind {
 
     FunctionSignature,
 
-    Distinct,
-
-    TraitBound,
-
     Meta,
+
+    Distinct,
 }
 
 impl TypeConstraintKind {
@@ -946,7 +973,6 @@ impl TypeConstraintKind {
             Self::PosFiniteF32 => TypeFlag::PosFiniteF32,
             Self::NegFiniteF64 => TypeFlag::NegFiniteF64,
             Self::PosFiniteF64 => TypeFlag::PosFiniteF64,
-            Self::UnitValue => TypeFlag::UnitValue,
             Self::AsciiChar => TypeFlag::AsciiChar,
             Self::UnicodeChar => TypeFlag::UnicodeChar,
             Self::UnitStringChar => TypeFlag::UnitString,
@@ -959,9 +985,8 @@ impl TypeConstraintKind {
             Self::MapLen | Self::MapItemType => TypeFlag::Map,
             Self::StructDefinition => TypeFlag::Struct,
             Self::FunctionSignature => TypeFlag::Function,
-            Self::Distinct => TypeFlag::Distinct,
-            Self::TraitBound => TypeFlag::TraitBound,
             Self::Meta => TypeFlag::Meta,
+            Self::Distinct => TypeFlag::Distinct,
         }
     }
 }
@@ -1096,11 +1121,6 @@ struct FiniteRange<T> {
     max: T,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct UnitValueConstraints {
-    // TODO
-}
-
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct AsciiCharRange {
     min: NonZeroU8,
@@ -1132,7 +1152,7 @@ struct MapItemType {
 /// with two fields for key and value.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct MapItemTypes {
-    item_types: BTreeSet<MapItemType>,
+    item_types: Vec<MapItemType>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -1151,31 +1171,10 @@ struct StructDefinition {
     fields: Vec<StructField>,
 }
 
-/// Contains a set of struct definitions.
-///
-/// Definitions must be merged where possible as long as no information is lost in the process.
-/// Merging is performed greedily from left to right.
-///
-/// Merging works as follows:
-///
-/// - For all `k=2` combinations
-/// - Find the first pairs for which:
-///   - Have the same fields (by name) in the same order
-///   - And the field types only differ for a single field
-/// - Merge them together
-/// - Repeat until no more are found
-///
-/// E.g. `y` can be merged in the following example:
-///
-/// ```txt
-/// (x: A, y: B,     z: D)
-/// (x: A, y:     C, z: D)
-/// ----------------------
-/// (x: A, y: B | C, z: D)
-/// ```
+/// Contains a list of struct definitions.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct StructDefinitions {
-    definitions: BTreeSet<StructDefinition>,
+    definitions: Vec<StructDefinition>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -1185,15 +1184,10 @@ struct FunctionSignature {
     ret: StaticType,
 }
 
-/// Contains a set of function signatures.
-///
-/// Signatures must be merged where possible as long as no information is lost in the process. The
-/// same rules as for [`StructDefinitions`] apply. [`FunctionSignature`] can be treated as a struct
-/// with two fields for argument and return value. However one caveat applies: The argument is
-/// contravariant and therefore has to use the same inverted logic that is used by complement sets.
+/// Contains a list of function signatures.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct FunctionSignatures {
-    signatures: BTreeSet<FunctionSignature>,
+    signatures: Vec<FunctionSignature>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -1208,7 +1202,7 @@ struct TraitBoundConstraints {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct MetaConstraints {
-    types: BTreeSet<StaticType>,
+    types: Vec<StaticType>,
 }
 
 /// Can be used if something might be either `true` or `false` but is not currently known.
