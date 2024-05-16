@@ -117,15 +117,15 @@ impl StaticType {
 
     /// Returns a type that only allows values that are allowed by both types.
     pub fn intersection(self, other: Self) -> Self {
-        let lhs = self.unoptimize_optional();
-        let rhs = other.unoptimize_optional();
+        let mut lhs = self.unoptimize_optional();
+        let mut rhs = other.unoptimize_optional();
         match (
-            lhs.flags.contains(TypeFlag::Complement),
-            rhs.flags.contains(TypeFlag::Complement),
+            lhs.flags.remove(TypeFlag::Complement),
+            rhs.flags.remove(TypeFlag::Complement),
         ) {
-            (true, true) => lhs.complement().raw_union(rhs.complement()),
-            (true, false) => rhs.raw_difference(lhs.complement()),
-            (false, true) => lhs.raw_difference(rhs.complement()),
+            (true, true) => lhs.raw_union(rhs).complement(),
+            (true, false) => rhs.raw_difference(lhs),
+            (false, true) => lhs.raw_difference(rhs),
             (false, false) => lhs.raw_intersection(rhs),
         }
         .optimize_optional()
