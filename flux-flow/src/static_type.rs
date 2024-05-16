@@ -1117,10 +1117,19 @@ struct MapItemTypes {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct StructDefinition {
+struct StructField {
     /// TODO: SBO String, field names are usually short
-    /// TODO: remember insertion order like indexmap but have it backed by a BTreeMap for Ord
-    fields: BTreeMap<String, StaticType>,
+    name: String,
+    field_type: StaticType,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+struct StructDefinition {
+    /// A list of struct fields.
+    ///
+    /// Order is important, since structs are sorted lexicographically by their field order. However
+    /// duplicate field names are still forbidden.
+    fields: Vec<StructField>,
 }
 
 /// Contains a set of struct definitions.
@@ -1132,10 +1141,10 @@ struct StructDefinition {
 ///
 /// - For all `k=2` combinations
 /// - Find the first pairs for which:
-///   - Have the same fields (by name)
-///   - And the field types only differ for a single field.
-/// - Merge them together.
-/// - Repeat until no more are found.
+///   - Have the same fields (by name) in the same order
+///   - And the field types only differ for a single field
+/// - Merge them together
+/// - Repeat until no more are found
 ///
 /// E.g. `y` can be merged in the following example:
 ///
@@ -1145,8 +1154,6 @@ struct StructDefinition {
 /// ----------------------
 /// (x: A, y: B | C, z: D)
 /// ```
-///
-/// TODO: Keep in mind that complement sets probably need some inverted logic here.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct StructDefinitions {
     definitions: BTreeSet<StructDefinition>,
