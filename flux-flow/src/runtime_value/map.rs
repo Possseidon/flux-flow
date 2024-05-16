@@ -39,7 +39,9 @@ impl PartialEq<OrderedImpl> for Impl {
     fn eq(&self, other: &OrderedImpl) -> bool {
         let self_map = self.as_map();
         let other_map = other.as_map();
-        equal(self_map.keys(), other_map.keys()) && equal(self_map.values(), other_map.values())
+        self_map.len() == other_map.len()
+            && equal(self_map.keys(), other_map.keys())
+            && equal(self_map.values(), other_map.values())
     }
 }
 
