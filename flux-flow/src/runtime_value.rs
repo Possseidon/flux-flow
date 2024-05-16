@@ -1,3 +1,4 @@
+mod function;
 mod list;
 mod map;
 mod number;
@@ -5,9 +6,11 @@ mod set;
 mod string;
 mod r#struct;
 
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use ordered_float::OrderedFloat;
+
+use self::function::DynFn;
 
 // TODO: structs and lists should have special variants that can reference directly into the stack
 // TODO: special variants for compound types that can be represented as raw bits
@@ -322,10 +325,26 @@ impl PartialEq<RuntimeStruct> for OrderedRuntimeStruct {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct RuntimeFunction {}
+pub struct RuntimeFunction {
+    function: function::Impl,
+}
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct RuntimeMeta {}
+pub type FnFunction = fn(&mut ());
+pub type DynFunction = Arc<dyn Fn(&mut ())>;
+
+impl RuntimeFunction {
+    pub fn from_fn(function: FnFunction) -> Self {
+        Self {
+            function: function::Impl::Fn(function),
+        }
+    }
+
+    pub fn from_dyn(function: DynFunction) -> Self {
+        Self {
+            function: function::Impl::Dyn(DynFn(function)),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct RuntimeDistinct {}
