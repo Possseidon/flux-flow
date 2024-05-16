@@ -254,37 +254,10 @@ impl StaticType {
     ///
     /// Panics if one of the types is not raw.
     fn raw_union(self, other: Self) -> Self {
-        self.raw_merge_into_superset(other, TypeConstraint::union)
-    }
-
-    /// Returns the intersection of two [raw](Self::is_raw) [`StaticType`]s.
-    ///
-    /// Panics if one of the types is not raw.
-    fn raw_intersection(self, other: Self) -> Self {
-        self.raw_merge_into_subset(other, TypeConstraint::intersection)
-    }
-
-    /// Returns the difference of two [raw](Self::is_raw) [`StaticType`]s.
-    ///
-    /// Panics if one of the types is not raw.
-    fn raw_difference(self, other: Self) -> Self {
-        self.raw_merge_into_subset(other, TypeConstraint::difference)
-    }
-
-    /// Merges two [raw](Self::is_raw) [`StaticType`]s into a superset.
-    ///
-    /// `merge` should be [`TypeConstraint::union`].
-    ///
-    /// Panics if one of the types is not raw.
-    fn raw_merge_into_superset(
-        self,
-        other: Self,
-        merge: impl Fn(TypeConstraint, TypeConstraint) -> Option<TypeConstraint>,
-    ) -> Self {
         assert!(self.is_raw());
         assert!(other.is_raw());
 
-        let flags = self.flags.intersection(other.flags);
+        let flags = self.flags.union(other.flags);
         Self::with_constraints(
             flags,
             merge_join_by(
@@ -292,8 +265,8 @@ impl StaticType {
                 other.filter_constraints(flags),
                 |left, right| left.kind().cmp(&right.kind()),
             )
-            .flat_map(|either_or_both| match either_or_both {
-                EitherOrBoth::Both(left, right) => merge(left, right),
+            .flat_map(|left_or_right| match left_or_right {
+                EitherOrBoth::Both(left, right) => TypeConstraint::union(left, right),
                 EitherOrBoth::Left(constraint) | EitherOrBoth::Right(constraint) => {
                     Some(constraint)
                 }
@@ -302,39 +275,66 @@ impl StaticType {
         )
     }
 
-    /// Merges two [raw](Self::is_raw) [`StaticType`]s into a subset.
-    ///
-    /// `merge` should be [`TypeConstraint::intersection`] or [`TypeConstraint::difference`].
+    /// Returns the intersection of two [raw](Self::is_raw) [`StaticType`]s.
     ///
     /// Panics if one of the types is not raw.
-    fn raw_merge_into_subset(
-        self,
-        other: Self,
-        merge: impl Fn(TypeConstraint, TypeConstraint) -> Option<TypeConstraint>,
-    ) -> Self {
+    fn raw_intersection(self, other: Self) -> Self {
         assert!(self.is_raw());
         assert!(other.is_raw());
 
         let mut flags = self.flags.intersection(other.flags);
 
-        // more complicated than raw_merge_into_superset since flags might need to get cleared
         let constraints = merge_join_by(
             self.filter_constraints(flags),
             other.filter_constraints(flags),
             |left, right| left.kind().cmp(&right.kind()),
         )
-        .flat_map(|either_or_both| match either_or_both {
+        .flat_map(|left_or_right| {
+            if let Some((left, right)) = left_or_right.both() {
+                let flag = left.flag();
+                assert!(right.flag() == flag);
+
+                let intersection = TypeConstraint::intersection(left, right);
+                if intersection.is_none() {
+                    flags.remove(flag);
+                }
+                intersection
+            } else {
+                unreachable!("should have been filtered out")
+            }
+        })
+        .collect_vec();
+
+        Self::with_constraints(flags, constraints)
+    }
+
+    /// Returns the difference of two [raw](Self::is_raw) [`StaticType`]s.
+    ///
+    /// Panics if one of the types is not raw.
+    fn raw_difference(self, other: Self) -> Self {
+        assert!(self.is_raw());
+        assert!(other.is_raw());
+
+        let mut flags = self.flags;
+
+        let constraints = merge_join_by(
+            self.filter_constraints(flags),
+            other.filter_constraints(flags),
+            |left, right| left.kind().cmp(&right.kind()),
+        )
+        .flat_map(|left_or_right| match left_or_right {
             EitherOrBoth::Both(left, right) => {
                 let flag = left.flag();
                 assert!(right.flag() == flag);
 
-                let intersection = merge(left, right);
+                let intersection = TypeConstraint::difference(left, right);
                 if intersection.is_none() {
                     flags.remove(flag);
                 }
                 intersection
             }
-            EitherOrBoth::Left(constraint) | EitherOrBoth::Right(constraint) => Some(constraint),
+            EitherOrBoth::Left(constraint) => Some(constraint),
+            EitherOrBoth::Right(_) => unreachable!("should have been filtered out"),
         })
         .collect_vec();
 
