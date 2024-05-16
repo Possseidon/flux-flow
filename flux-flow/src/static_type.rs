@@ -843,8 +843,6 @@ impl TypeConstraint {
 
             // Distinct => merge_distincts,
 
-            // TraitBound => merge_trait_bounds,
-
             // Meta => merge_metas,
         }
     }
@@ -1192,11 +1190,6 @@ struct FunctionSignatures {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct DistinctConstraints {
-    // TODO
-}
-
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct TraitBoundConstraints {
     // TODO
 }
 
