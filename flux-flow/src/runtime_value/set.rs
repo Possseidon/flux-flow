@@ -55,6 +55,6 @@ impl PartialOrd for Impl {
 
 impl Ord for Impl {
     fn cmp(&self, other: &Self) -> Ordering {
-        todo!("compare using list_type")
+        todo!("compare using set_type")
     }
 }

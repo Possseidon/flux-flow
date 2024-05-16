@@ -102,6 +102,6 @@ impl PartialOrd for OrderedImpl {
 
 impl Ord for OrderedImpl {
     fn cmp(&self, other: &Self) -> Ordering {
-        todo!("compare using list_type")
+        todo!("compare using map_type")
     }
 }
