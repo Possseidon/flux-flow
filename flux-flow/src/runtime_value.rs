@@ -25,6 +25,16 @@ pub enum RuntimeValue {
     Distinct(RuntimeDistinct),
 }
 
+impl RuntimeValue {
+    pub const UNIT: Self = Self::Ordered(OrderedRuntimeValue::UNIT);
+}
+
+impl Default for RuntimeValue {
+    fn default() -> Self {
+        Self::UNIT
+    }
+}
+
 impl std::hash::Hash for RuntimeValue {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
@@ -53,26 +63,6 @@ impl std::hash::Hash for RuntimeValue {
     }
 }
 
-impl PartialEq<OrderedRuntimeValue> for RuntimeValue {
-    fn eq(&self, other: &OrderedRuntimeValue) -> bool {
-        match (self, other) {
-            (Self::Ordered(lhs), rhs) => lhs == rhs,
-            (Self::List(lhs), OrderedRuntimeValue::List(rhs)) => lhs == rhs,
-            (Self::Map(lhs), OrderedRuntimeValue::Map(rhs)) => lhs == rhs,
-            (Self::Struct(lhs), OrderedRuntimeValue::Struct(rhs)) => lhs == rhs,
-            (Self::Distinct(lhs), OrderedRuntimeValue::Distinct(rhs)) => lhs == rhs,
-
-            _ => false,
-        }
-    }
-}
-
-impl PartialEq<RuntimeValue> for OrderedRuntimeValue {
-    fn eq(&self, other: &RuntimeValue) -> bool {
-        other == self
-    }
-}
-
 impl PartialEq for RuntimeValue {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -91,13 +81,23 @@ impl PartialEq for RuntimeValue {
     }
 }
 
-impl RuntimeValue {
-    pub const UNIT: Self = Self::Ordered(OrderedRuntimeValue::UNIT);
+impl PartialEq<OrderedRuntimeValue> for RuntimeValue {
+    fn eq(&self, other: &OrderedRuntimeValue) -> bool {
+        match (self, other) {
+            (Self::Ordered(lhs), rhs) => lhs == rhs,
+            (Self::List(lhs), OrderedRuntimeValue::List(rhs)) => lhs == rhs,
+            (Self::Map(lhs), OrderedRuntimeValue::Map(rhs)) => lhs == rhs,
+            (Self::Struct(lhs), OrderedRuntimeValue::Struct(rhs)) => lhs == rhs,
+            (Self::Distinct(lhs), OrderedRuntimeValue::Distinct(rhs)) => lhs == rhs,
+
+            _ => false,
+        }
+    }
 }
 
-impl Default for RuntimeValue {
-    fn default() -> Self {
-        Self::Ordered(Default::default())
+impl From<OrderedRuntimeValue> for RuntimeValue {
+    fn from(value: OrderedRuntimeValue) -> Self {
+        Self::Ordered(value)
     }
 }
 
@@ -195,6 +195,12 @@ impl std::hash::Hash for OrderedRuntimeValue {
     }
 }
 
+impl PartialEq<RuntimeValue> for OrderedRuntimeValue {
+    fn eq(&self, other: &RuntimeValue) -> bool {
+        other == self
+    }
+}
+
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ValueKind {
     Boolean,
@@ -287,7 +293,7 @@ pub struct RuntimeStruct {
 }
 
 impl RuntimeStruct {
-    const UNIT: Self = Self {
+    pub const UNIT: Self = Self {
         r#struct: r#struct::Impl::Empty,
     };
 }
@@ -304,7 +310,7 @@ pub struct OrderedRuntimeStruct {
 }
 
 impl OrderedRuntimeStruct {
-    const UNIT: Self = Self {
+    pub const UNIT: Self = Self {
         r#struct: r#struct::OrderedImpl::Empty,
     };
 }
