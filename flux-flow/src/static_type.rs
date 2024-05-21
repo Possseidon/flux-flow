@@ -10,6 +10,10 @@ use itertools::{merge_join_by, EitherOrBoth, Itertools};
 use malachite::{Natural, Rational};
 use ordered_float::NotNan;
 
+use crate::runtime_value::store::{
+    OrderedRuntimeValueStore, RuntimeValueStore, RuntimeValueStoreAs,
+};
+
 // TODO: I want a function that:
 //       Given a static type returns a stack-push/get/... function for a concrete type T.
 //       This function can then be used directly in the compiled instructions without having to
@@ -83,16 +87,40 @@ impl StaticType {
     /// Useful for true dynamic typing if absolutely nothing about a variable is known.
     pub const ANY: Self = Self::from_flags(TypeFlag::ANY);
 
+    /// Whether this type is [`StaticType::NEVER`].
     pub fn is_never(&self) -> bool {
         self == &Self::NEVER
     }
 
+    /// Whether this type is [`StaticType::UNIT`].
     pub fn is_unit(&self) -> bool {
         self == &Self::UNIT
     }
 
+    /// Whether this type is [`StaticType::ANY`].
     pub fn is_any(&self) -> bool {
         self == &Self::ANY
+    }
+
+    pub fn runtime_value_store(&self) -> Option<RuntimeValueStore> {
+        // if there is no TypeFlag set, return None
+        // if there is one unit TypeFlag set, return None
+        // if there are two unit TypeFlags set, return Bit
+        // if there are N unit TypeFlags set, encode them as bits in U8 or U64
+        // TODO
+
+        if self.flags == TypeFlag::PosInteger {
+            RuntimeValueStore::U64(RuntimeValueStoreAs {
+                static_type: &self,
+                store: |_, _| todo!(),
+                load: |_, _| todo!(),
+            });
+        }
+        None
+    }
+
+    pub fn ordered_runtime_value_store(&self) -> Option<OrderedRuntimeValueStore> {
+        None
     }
 
     /// Returns whether this type allows at most all values that `other` allows.
@@ -1205,9 +1233,3 @@ struct DistinctConstraints {
 struct MetaConstraints {
     types: Vec<StaticType>,
 }
-
-/// Can be used if something might be either `true` or `false` but is not currently known.
-///
-/// Notably `false && maybe == false` and `true || maybe == true`. Most other operations will simply
-/// result in `maybe`.
-struct Maybe;

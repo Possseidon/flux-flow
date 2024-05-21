@@ -1,3 +1,5 @@
+pub mod store;
+
 mod function;
 mod list;
 mod map;

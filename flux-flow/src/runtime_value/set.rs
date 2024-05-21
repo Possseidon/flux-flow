@@ -51,6 +51,9 @@ pub(super) enum OrderedImpl {
         /// Completely ignored by [`Hash`] and [`Eq`].
         set_type: StaticType,
     },
+    BitSet {
+        bits: [usize; 2],
+    },
 }
 
 impl OrderedImpl {

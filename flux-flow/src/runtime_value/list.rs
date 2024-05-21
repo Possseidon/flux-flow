@@ -1,4 +1,6 @@
-use std::{cmp::Ordering, sync::Arc};
+use std::{
+    any::Any, cmp::Ordering, collections::VecDeque, hash::Hasher, num::NonZeroUsize, sync::Arc,
+};
 
 use crate::static_type::StaticType;
 
@@ -8,14 +10,25 @@ use super::{OrderedRuntimeValue, RuntimeValue};
 pub(super) enum Impl {
     #[default]
     Empty,
-    NonEmpty(Arc<Vec<RuntimeValue>>),
+
+    ZstLen(NonZeroUsize),
+
+    InlineBytes([u8; 23]), // TODO: how big can I get this?
+    ArrayBytes(Arc<[u8]>),
+    VecBytes(Arc<Vec<u8>>),
+    VecDequeBytes(Arc<VecDeque<u8>>),
+
+    ArrayValues(Arc<[RuntimeValue]>),
+    VecValues(Arc<Vec<RuntimeValue>>),
+    VecDequeValues(Arc<VecDeque<RuntimeValue>>),
 }
 
 impl Impl {
     fn as_slice(&self) -> &[RuntimeValue] {
         match self {
             Impl::Empty => &[],
-            Impl::NonEmpty(values) => values.as_slice(),
+            // Impl::Vec(values) => values.as_slice(),
+            _ => todo!(),
         }
     }
 }
@@ -42,8 +55,29 @@ impl PartialEq<OrderedImpl> for Impl {
 pub(super) enum OrderedImpl {
     #[default]
     Empty,
-    NonEmpty {
+    Vec {
         values: Arc<Vec<OrderedRuntimeValue>>,
+        /// Only used to determine how to compute [`Ord`].
+        ///
+        /// Completely ignored by [`Hash`] and [`Eq`].
+        list_type: StaticType,
+    },
+    VecDeque {
+        values: Arc<VecDeque<OrderedRuntimeValue>>,
+        /// Only used to determine how to compute [`Ord`].
+        ///
+        /// Completely ignored by [`Hash`] and [`Eq`].
+        list_type: StaticType,
+    },
+    VecBytes {
+        bytes: Arc<Vec<u8>>,
+        /// Only used to determine how to compute [`Ord`].
+        ///
+        /// Completely ignored by [`Hash`] and [`Eq`].
+        list_type: StaticType,
+    },
+    Stack {
+        stack_index: usize,
         /// Only used to determine how to compute [`Ord`].
         ///
         /// Completely ignored by [`Hash`] and [`Eq`].
@@ -55,14 +89,16 @@ impl OrderedImpl {
     fn as_slice(&self) -> &[OrderedRuntimeValue] {
         match self {
             OrderedImpl::Empty => &[],
-            OrderedImpl::NonEmpty { values, .. } => values,
+            OrderedImpl::Vec { values, .. } => values,
+            _ => todo!(),
         }
     }
 
     fn list_type(&self) -> Option<&StaticType> {
         match self {
             OrderedImpl::Empty => None,
-            OrderedImpl::NonEmpty { list_type, .. } => Some(list_type),
+            OrderedImpl::Vec { list_type, .. } => Some(list_type),
+            _ => todo!(),
         }
     }
 }
