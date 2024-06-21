@@ -463,6 +463,8 @@ enum TypeFlag {
     /// The [`bool`] value `true`.
     True,
 
+    /// A number that is less than all other numbers.
+    NegInfinity,
     /// Any negative integer, excluding zero.
     NegInteger,
     /// Any negative, non-integer rational number.
@@ -477,6 +479,10 @@ enum TypeFlag {
     PosInteger,
     /// Any positive, non-integer rational number.
     PosRational,
+    /// A number that is greater than all other numbers.
+    PosInfinity,
+    /// The result of dividing zero by zero.
+    ZeroOverZero,
 
     /// [`f32::NEG_INFINITY`].
     NegInfinityF32,
