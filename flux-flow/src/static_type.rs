@@ -439,9 +439,9 @@ enum TypeFlag {
     /// If [`TypeFlag::Complement`] is also set, it results in an optional any, since that is more
     /// common than a type that can hold everything except a specific optional.
     ///
-    /// When optionals are nested multiple layers deep, the innermost optional is wrapped like this.
-    /// Additionally, every other layer also has to be wrapped in this way. This simplifies both
-    /// wrapping a type in an option as well as unwrapping that type again. If the outermost
+    /// When optionals are nested multiple layers deep, the innermost optional is wrapped like
+    /// this. Additionally, every other layer also has to be wrapped in this way. This simplifies
+    /// both wrapping a type in an option as well as unwrapping that type again. If the outermost
     /// optional was wrapped instead, (un)wrapping would have to recurse through all layers to
     /// update them.
     ///
@@ -450,8 +450,8 @@ enum TypeFlag {
 
     /// Marks the type as holding anything except the values that it would hold without this flag.
     ///
-    /// If [`TypeFlag::WrapOptional`] is also set, it results in an optional any, since that is more
-    /// common than a type that can hold everything except a specific optional.
+    /// If [`TypeFlag::WrapOptional`] is also set, it results in an optional any, since that is
+    /// more common than a type that can hold everything except a specific optional.
     ///
     /// This is one of the special flags that don't directly correspond to actual values.
     Complement,
@@ -1166,8 +1166,8 @@ struct StructField {
 struct StructDefinition {
     /// A list of struct fields.
     ///
-    /// Order is important, since structs are sorted lexicographically by their field order. However
-    /// duplicate field names are still forbidden.
+    /// Order is important, since structs are sorted lexicographically by their field order.
+    /// However duplicate field names are still forbidden.
     fields: Vec<StructField>,
 }
 
