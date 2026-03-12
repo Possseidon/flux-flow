@@ -1,4 +1,6 @@
 [workspace]
-members = ["flux-flow", "flux-flow-macros", "utils/*"]
-resolver = "2"
+resolver = "3"
+members = ["flux-flow", "flux-flow-macros"]
 default-members = ["flux-flow"]
+
+[workspace.dependencies]

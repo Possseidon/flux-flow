@@ -1,10 +1,5 @@
 # FluxFlow
 
-FluxFlow is a statically typed scripting language with its main focus on game development.
+FluxFlow is a **statically typed** scripting language.
 
-It is syntactically very similar to Rust.
-
-Differences from Rust:
-
-- Dynamic compilation including hot-reloading of existing functions.
-- `unsafe` is not a thing.
+Because dynamic typing is pain; why add it as an afterthought (via type hints) when you can just bake it into the language from the get-go?
