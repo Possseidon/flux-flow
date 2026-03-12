@@ -14,9 +14,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - if: runner.os == 'linux'
-        name: Install alsa and udev
-        run: sudo apt-get update; sudo apt-get install --no-install-recommends libasound2-dev libudev-dev
       - uses: actions/checkout@v6
       - name: Install Rust toolchain
         run: rustup update --no-self-update
